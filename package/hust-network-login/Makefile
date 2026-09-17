@@ -16,7 +16,7 @@ define Package/hust-network-login
   CATEGORY:=Network
   TITLE:=HUST campus network auto login (C)
   URL:=https://github.com/black-binary/hust-network-login
-  DEPENDS:=+libcurl +libopenssl
+  DEPENDS:=+libcurl4 +libopenssl3
 endef
 
 define Package/hust-network-login/description
