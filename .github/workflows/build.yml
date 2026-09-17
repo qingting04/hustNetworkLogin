@@ -36,6 +36,8 @@ jobs:
         run: |
           cd immortalwrt-sdk-*/
           ./scripts/feeds update -i
+          ./scripts/feeds install -a -f
+          make defconfig
           make package/hust-network-login/compile V=s -j$(nproc)
           make package/luci-app-hust-network-login/compile V=s -j$(nproc)
 
