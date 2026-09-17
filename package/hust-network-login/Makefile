@@ -3,6 +3,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=hust-network-login
 PKG_VERSION:=0.2.0
 PKG_RELEASE:=1
+PKG_BUILD_DEPENDS:=curl openssl
 
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=HUST campus network
@@ -16,7 +17,7 @@ define Package/hust-network-login
   CATEGORY:=Network
   TITLE:=HUST campus network auto login (C)
   URL:=https://github.com/black-binary/hust-network-login
-  DEPENDS:=+libcurl4 +libopenssl3
+  DEPENDS:=+libcurl +libopenssl
 endef
 
 define Package/hust-network-login/description
