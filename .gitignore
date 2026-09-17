@@ -1,0 +1,10 @@
+# 编译产物
+*.ipk
+*.o
+*.bin
+*.tar.zst
+test_encrypt
+
+# 系统/编辑器文件
+.DS_Store
+*.swp
