@@ -29,8 +29,9 @@ define Build/Prepare
 endef
 
 define Build/Compile
-	$(TARGET_CC) $(TARGET_CFLAGS) -o $(PKG_BUILD_DIR)/hust-network-login \
-		$(PKG_BUILD_DIR)/main.c $(TARGET_LDFLAGS) -lcurl -lcrypto
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) \
+		-o $(PKG_BUILD_DIR)/hust-network-login $(PKG_BUILD_DIR)/main.c \
+		$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/lib -lcurl -lcrypto
 endef
 
 define Package/hust-network-login/install
