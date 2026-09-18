@@ -1,0 +1,44 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-hustNetworkLogin\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-19 00:00+0800\n"
+"PO-Revision-Date: 2026-09-19 00:00+0800\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Addresses used to check whether the connection is up. Multiple addresses are supported, separated by commas (tried in order); leave empty to use the built-in default."
+msgstr "用于检测是否在线的地址，支持逗号分隔多个（按顺序自动 fallback），留空使用内置默认值。"
+
+msgid "Check interval (seconds)"
+msgstr "检测间隔（秒）"
+
+msgid "Enable automatic login"
+msgstr "启用自动登录"
+
+msgid "HUST Network Login"
+msgstr "华中科技大学校园网登录"
+
+msgid "Interval between online checks, 15 seconds when left empty."
+msgstr "在线时的检测周期，留空默认 15 秒。"
+
+msgid "Password"
+msgstr "密码"
+
+msgid "Probe URL"
+msgstr "探测地址"
+
+msgid "Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it."
+msgstr "深澜 ePortal 认证（华中科技大学校园网）。开启后服务常驻运行，掉线自动重连；保存配置会自动重启服务。"
+
+msgid "Username"
+msgstr "用户名"
+
+msgid "comma separated, multiple allowed"
+msgstr "多个地址用逗号分隔"
+

@@ -17,6 +17,7 @@
 - 纯 C 实现（`libcurl` + `libopenssl`），OpenWrt 原生交叉编译
 - 掉线 15 秒检测并自动重连
 - LuCI 网页配置（JS 框架，需 LuCI 23.05+，ImmortalWrt 23.05/25.x 均支持）
+- 界面文案走 LuCI 标准 i18n：英文 msgid + `po/zh_Hans` 翻译包，中文界面由 `luci-i18n-hustNetworkLogin-zh-cn` 提供
 - GitHub Actions 云端编译，本地零环境
 
 ## 快速开始：fork 编译（推荐，无需本地环境）
@@ -48,20 +49,24 @@ env:
 
 ### 4. 下载产物
 
-Actions → 最近一次运行 → **Summary** → 下载 `hustNetworkLogin` artifact，解压得到两个 `.apk`：
+Actions → 最近一次运行 → **Summary** → 下载 `hustNetworkLogin` artifact，解压得到三个 `.apk`：
 
 ```
-hustNetworkLogin_0.2.0-1_mipsel_24kc.apk
-luci-app-hustNetworkLogin_1.0.0-1_all.apk
+hustNetworkLogin_0.2.0-1_mipsel_24kc.apk          # 守护进程（C）
+luci-app-hustNetworkLogin_1.0.0-1_all.apk         # LuCI 页面
+luci-i18n-hustNetworkLogin-zh-cn_*_all.apk        # 中文界面翻译包（可选）
 ```
+
+> 不装翻译包时界面是英文（msgid 即英文原文），装了就是中文 —— 这是 LuCI 的标准做法。
 
 ### 5. 装到路由器
 
 ```sh
-scp hustNetworkLogin_*.apk luci-app-hustNetworkLogin_*.apk root@192.168.1.1:/tmp/
+scp hustNetworkLogin_*.apk luci-app-hustNetworkLogin_*.apk luci-i18n-hustNetworkLogin-*.apk root@192.168.1.1:/tmp/
 ssh root@192.168.1.1
 apk add --allow-untrusted /tmp/hustNetworkLogin_*.apk
 apk add --allow-untrusted /tmp/luci-app-hustNetworkLogin_*.apk
+apk add --allow-untrusted /tmp/luci-i18n-hustNetworkLogin-*.apk      # 中文界面（可选）
 ```
 
 > `--allow-untrusted` 是因为本地/CI 编译的包没有官方签名。
@@ -82,7 +87,7 @@ make package/luci-app-hustNetworkLogin/compile V=s
 
 ## 使用
 
-打开 LuCI（`http://192.168.1.1`）→ **服务 → hustNetworkLogin**，填学号、密码，勾选「启用自动登录」，保存。
+打开 LuCI（`http://192.168.1.1`）→ **服务 → HUST Network Login**（中文界面下显示为「华中科技大学校园网登录」），填学号、密码，勾选「启用自动登录」，保存。
 
 命令行等价：
 
@@ -121,6 +126,7 @@ uci commit hust-network-login && /etc/init.d/hust-network-login reload
 ├── luci-app-hustNetworkLogin/         # LuCI 插件（JS 版）
 │   ├── Makefile
 │   ├── htdocs/luci-static/resources/view/hustNetworkLogin.js
+│   ├── po/zh_Hans/luci-app-hustNetworkLogin.po   # 中文翻译（英文 msgid → 中文）
 │   └── root/usr/share/luci/menu.d/luci-app-hustNetworkLogin.json
 └── .github/workflows/build.yml        # GitHub Actions 云端编译
 ```

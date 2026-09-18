@@ -11,32 +11,32 @@ return view.extend({
 	render: function() {
 		var m, s, o;
 
-		m = new form.Map('hust-network-login', _('hustNetworkLogin'),
-			_('深澜 ePortal 认证（华中科技大学校园网）。开启后服务常驻运行，掉线自动重连；保存配置会自动重启服务。'));
+		m = new form.Map('hust-network-login', _('HUST Network Login'),
+			_('Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it.'));
 
 		s = m.section(form.NamedSection, 'main', 'hust-network-login');
 		s.anonymous = true;
 
-		o = s.option(form.Flag, 'enabled', _('启用自动登录'));
+		o = s.option(form.Flag, 'enabled', _('Enable automatic login'));
 		o.rmempty = false;
 
-		o = s.option(form.Value, 'username', _('用户名'));
+		o = s.option(form.Value, 'username', _('Username'));
 		o.rmempty = false;
 
-		o = s.option(form.Value, 'password', _('密码'));
+		o = s.option(form.Value, 'password', _('Password'));
 		o.rmempty = false;
 		o.password = true;
 
-		o = s.option(form.Value, 'test_url', _('探测地址'));
+		o = s.option(form.Value, 'test_url', _('Probe URL'));
 		o.rmempty = true;
-		o.placeholder = '多个地址用逗号分隔';
-		o.description = _('用于检测是否在线的地址，支持逗号分隔多个（自动 fallback），留空用默认值');
+		o.placeholder = _('comma separated, multiple allowed');
+		o.description = _('Addresses used to check whether the connection is up. Multiple addresses are supported, separated by commas (tried in order); leave empty to use the built-in default.');
 
-		o = s.option(form.Value, 'check_interval', _('检测间隔（秒）'));
+		o = s.option(form.Value, 'check_interval', _('Check interval (seconds)'));
 		o.rmempty = true;
 		o.datatype = 'uinteger';
 		o.placeholder = '15';
-		o.description = _('在线时的检测周期，留空默认 15 秒');
+		o.description = _('Interval between online checks, 15 seconds when left empty.');
 
 		return m.render();
 	}

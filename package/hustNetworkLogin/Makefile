@@ -21,7 +21,8 @@ define Package/hustNetworkLogin
 endef
 
 define Package/hustNetworkLogin/description
-  深澜 ePortal 校园网自动登录（华中科技大学），C 实现，掉线 15 秒自动重连。
+  Automatic Srun ePortal login for the HUST campus network (C implementation),
+  reconnects automatically 15 seconds after the connection drops.
 endef
 
 define Build/Prepare
