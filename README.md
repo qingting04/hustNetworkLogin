@@ -94,6 +94,19 @@ uci commit hust-network-login && /etc/init.d/hust-network-login reload
 logread | grep -i hust   # 看日志
 ```
 
+### 可配置项
+
+| UCI 项 | 默认值 | 说明 |
+|---|---|---|
+| `test_url` | `http://connect.rom.miui.com/generate_204` | 在线探测地址，留空用默认。默认用轻量 204 探测（在线时返回空响应，省流量），可改成 `http://www.baidu.com` 等 |
+| `check_interval` | `15` | 在线时的检测周期（秒）。掉线是立即重连，此值只影响「在线时多久探测一次」 |
+
+```sh
+uci set hust-network-login.main.test_url='http://www.baidu.com'
+uci set hust-network-login.main.check_interval='30'
+uci commit hust-network-login && /etc/init.d/hust-network-login reload
+```
+
 ## 目录结构
 
 ```

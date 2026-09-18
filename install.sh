@@ -35,11 +35,13 @@ PROG="/usr/bin/hust-network-login"
 CONFIG="hust-network-login"
 
 start_service() {
-	local enabled username password
+	local enabled username password test_url check_interval
 	config_load "$CONFIG"
 	config_get_bool enabled "main" "enabled" "0"
 	config_get username "main" "username"
 	config_get password "main" "password"
+	config_get test_url "main" "test_url"
+	config_get check_interval "main" "check_interval"
 
 	[ "$enabled" = "1" ] || return 0
 	[ -n "$username" ] || return 0
@@ -49,7 +51,9 @@ start_service() {
 	procd_open_instance
 	procd_set_param command "$PROG"
 	procd_set_param env HUST_NETWORK_LOGIN_USERNAME="$username" \
-	                     HUST_NETWORK_LOGIN_PASSWORD="$password"
+	                     HUST_NETWORK_LOGIN_PASSWORD="$password" \
+	                     HUST_NETWORK_LOGIN_TEST_URL="$test_url" \
+	                     HUST_NETWORK_LOGIN_CHECK_INTERVAL="$check_interval"
 	procd_set_param respawn 3600 5 5
 	procd_set_param file "/etc/config/$CONFIG"
 	procd_close_instance
@@ -73,6 +77,8 @@ config main 'main'
 	option enabled '0'
 	option username ''
 	option password ''
+	option test_url 'http://connect.rom.miui.com/generate_204'
+	option check_interval '15'
 EOF
 fi
 
@@ -81,7 +87,7 @@ mkdir -p /usr/share/luci/menu.d
 cat > /usr/share/luci/menu.d/luci-app-hustNetworkLogin.json <<'EOF'
 {
 	"admin/services/hustNetworkLogin": {
-		"title": "校园网登录",
+		"title": "hustNetworkLogin",
 		"order": 90,
 		"action": {
 			"type": "view",
@@ -108,7 +114,7 @@ return view.extend({
 		var m, s, o;
 
 		m = new form.Map('hust-network-login', _('hustNetworkLogin'),
-			_('深澜 ePortal 认证（华中科技大学校园网）。开启后服务常驻运行，掉线后 15 秒自动重连；保存配置会自动重启服务。'));
+			_('深澜 ePortal 认证（华中科技大学校园网）。开启后服务常驻运行，掉线自动重连；保存配置会自动重启服务。'));
 
 		s = m.section(form.NamedSection, 'main', 'hust-network-login');
 		s.anonymous = true;

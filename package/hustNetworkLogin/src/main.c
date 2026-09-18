@@ -15,7 +15,12 @@
 #include <curl/curl.h>
 #include <openssl/bn.h>
 
-#define TEST_URL "http://www.baidu.com"
+/* 在线探测地址：默认用轻量的 captive portal 检测地址（在线时返回 204 空响应），
+ * 掉线时同样会被门户拦截并返回带 query string 的页面。
+ * 可用环境变量 HUST_NETWORK_LOGIN_TEST_URL 覆盖。 */
+static const char *test_url = "http://connect.rom.miui.com/generate_204";
+/* 在线检测间隔（秒），可用环境变量 HUST_NETWORK_LOGIN_CHECK_INTERVAL 覆盖 */
+static int check_interval = 15;
 
 /* 深澜 ePortal 的 RSA 公钥（e=10001, n=94dd2a86...，pageInfo 实测） */
 #define MODULUS \
@@ -61,10 +66,13 @@ static char *http_get(const char *url)
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "hust-network-login");
 
-	if (curl_easy_perform(curl) == CURLE_OK && buf.data)
-		result = buf.data;
-	else
+	if (curl_easy_perform(curl) == CURLE_OK) {
+		result = buf.data ? buf.data : malloc(1);
+		if (result)
+			result[0] = '\0';
+	} else {
 		free(buf.data);
+	}
 
 	curl_easy_cleanup(curl);
 	return result;
@@ -204,9 +212,9 @@ static int login(const char *username, const char *password)
 	char body[2048], login_url[160];
 	int ok = -1;
 
-	resp = http_get(TEST_URL);
+	resp = http_get(test_url);
 	if (!resp) {
-		syslog(LOG_ERR, "get %s failed", TEST_URL);
+		syslog(LOG_ERR, "get %s failed", test_url);
 		return -1;
 	}
 
@@ -281,6 +289,18 @@ int main(int argc, char **argv)
 
 	openlog("hust-network-login", LOG_PID | LOG_NDELAY, LOG_DAEMON);
 
+	{
+		const char *tu = getenv("HUST_NETWORK_LOGIN_TEST_URL");
+		const char *ci = getenv("HUST_NETWORK_LOGIN_CHECK_INTERVAL");
+		if (tu && tu[0])
+			test_url = tu;
+		if (ci && ci[0]) {
+			int v = atoi(ci);
+			if (v > 0)
+				check_interval = v;
+		}
+	}
+
 	if (argc >= 2) {
 		if (read_conf(argv[1], username, password) != 0) {
 			syslog(LOG_ERR, "failed to read config file: %s", argv[1]);
@@ -310,7 +330,7 @@ int main(int argc, char **argv)
 	for (;;) {
 		if (login(username, password) == 0) {
 			syslog(LOG_INFO, "login ok, awaiting");
-			sleep(15);
+			sleep(check_interval);
 		} else {
 			syslog(LOG_ERR, "login failed, retry in 1s");
 			sleep(1);
