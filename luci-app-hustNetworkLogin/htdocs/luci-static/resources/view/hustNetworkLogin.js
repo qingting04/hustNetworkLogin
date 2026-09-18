@@ -89,22 +89,11 @@ return view.extend({
 	},
 
 	refresh_status: function() {
+		/* 只显示连接状态与最近错误：守护进程不在运行时 ubus 会返回 state=stopped，
+		 * 所以不需要单独一行「服务状态」。 */
 		return callStatus().catch(function() { return null; }).then(function(st) {
-			if (!st) {
-				set_text('hust-status-service', '-');
-				set_text('hust-status-state', _('Unknown'));
-				set_text('hust-status-error', '-');
-				set_text('hust-status-updated', '-');
-				return;
-			}
-
-			set_text('hust-status-service',
-				(st.enabled ? _('Enabled') : _('Disabled')) + ' · ' +
-				(st.running ? _('Running') : _('Stopped')) + (st.running ? ' (pid %d)'.format(st.pid) : ''));
-			set_text('hust-status-state', state_label(st.state));
-			set_text('hust-status-error', st.last_error || '-');
-			set_text('hust-status-updated',
-				st.updated ? new Date(st.updated * 1000).toLocaleString() : '-');
+			set_text('hust-status-state', st ? state_label(st.state) : _('Unknown'));
+			set_text('hust-status-error', (st && st.last_error) || '-');
 		});
 	},
 
@@ -139,10 +128,8 @@ return view.extend({
 			var box = E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, [ _('Service status') ]),
 				E('div', { 'class': 'table' }, [
-					row(_('Service'), E('span', { 'id': 'hust-status-service' }, [ '-' ])),
 					row(_('Connection state'), E('span', { 'id': 'hust-status-state' }, [ '-' ])),
-					row(_('Last error'), E('span', { 'id': 'hust-status-error' }, [ '-' ])),
-					row(_('Last update'), E('span', { 'id': 'hust-status-updated' }, [ '-' ]))
+					row(_('Last error'), E('span', { 'id': 'hust-status-error' }, [ '-' ]))
 				]),
 				E('div', { 'class': 'cbi-page-actions' }, [
 					E('button', {

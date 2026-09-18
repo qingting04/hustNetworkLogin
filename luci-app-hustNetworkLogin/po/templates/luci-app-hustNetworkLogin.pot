@@ -24,22 +24,13 @@ msgstr ""
 msgid "Connection state"
 msgstr ""
 
-msgid "Disabled"
-msgstr ""
-
 msgid "Enable automatic login"
-msgstr ""
-
-msgid "Enabled"
 msgstr ""
 
 msgid "HUST Network Login"
 msgstr ""
 
 msgid "Last error"
-msgstr ""
-
-msgid "Last update"
 msgstr ""
 
 msgid "Login failed, retrying"
@@ -58,12 +49,6 @@ msgid "Reconnect"
 msgstr ""
 
 msgid "Reconnect failed: %s"
-msgstr ""
-
-msgid "Running"
-msgstr ""
-
-msgid "Service"
 msgstr ""
 
 msgid "Service status"

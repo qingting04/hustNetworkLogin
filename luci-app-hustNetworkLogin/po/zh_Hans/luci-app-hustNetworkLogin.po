@@ -24,23 +24,14 @@ msgstr "探测中"
 msgid "Connection state"
 msgstr "连接状态"
 
-msgid "Disabled"
-msgstr "已禁用"
-
 msgid "Enable automatic login"
 msgstr "启用自动登录"
-
-msgid "Enabled"
-msgstr "已启用"
 
 msgid "HUST Network Login"
 msgstr "华中科技大学校园网登录"
 
 msgid "Last error"
 msgstr "最近错误"
-
-msgid "Last update"
-msgstr "最后更新"
 
 msgid "Login failed, retrying"
 msgstr "登录失败，重试中"
@@ -59,12 +50,6 @@ msgstr "重连"
 
 msgid "Reconnect failed: %s"
 msgstr "重连失败：%s"
-
-msgid "Running"
-msgstr "运行中"
-
-msgid "Service"
-msgstr "服务"
 
 msgid "Service status"
 msgstr "服务状态"

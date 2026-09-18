@@ -110,12 +110,16 @@ return {
 				let st = read_state();
 				let pid = current_pid();
 				let updated = st.updated;
+				let state;
 
 				if (type(updated) != 'string' || !match(updated, /^[0-9]+$/))
 					updated = 0;
 
+				/* 进程不在了就当 stopped：状态文件可能还留着上次崩溃前的 online */
+				state = (pid != null) ? (st.state ?? 'unknown') : 'stopped';
+
 				return {
-					state: st.state ?? (pid != null ? 'unknown' : 'stopped'),
+					state: state,
 					last_error: st.last_error ?? '',
 					updated: +updated,
 					running: pid != null,
