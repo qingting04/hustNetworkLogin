@@ -5,12 +5,17 @@
  * 依赖：libcurl（HTTP）、libcrypto/libopenssl（RSA 大数运算）。
  * 配置：环境变量 HUST_NETWORK_LOGIN_USERNAME / HUST_NETWORK_LOGIN_PASSWORD，
  *       或命令行传配置文件路径（两行：第一行用户名，第二行密码）。
+ *
+ * 状态上报：把 state / last_error / updated 写入 /tmp/run/hust-network-login.state，
+ *           供 LuCI 页面（luci-app-hustNetworkLogin）轮询显示。
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <syslog.h>
+#include <stdarg.h>
+#include <time.h>
 #include <ctype.h>
 #include <curl/curl.h>
 #include <openssl/bn.h>
@@ -24,6 +29,40 @@ static const char *test_url =
 	"http://www.baidu.com";
 /* 在线检测间隔（秒），可用环境变量 HUST_NETWORK_LOGIN_CHECK_INTERVAL 覆盖 */
 static int check_interval = 15;
+
+/*
+ * 运行状态上报：把状态与最近一次错误写进一个小文件，供 LuCI 界面轮询显示。
+ * 路径要和 luci-app-hustNetworkLogin 的 acl.d 里声明的路径完全一致
+ * （rpcd 读文件时会 realpath 后再校验 ACL，所以这里用没有符号链接的 /tmp/run）。
+ */
+static const char *state_file = "/tmp/run/hust-network-login.state";
+static char last_error[224];
+
+/* 记录最近一次错误：既进 syslog，也留给 Web 界面显示 */
+static void set_error(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(last_error, sizeof(last_error), fmt, ap);
+	va_end(ap);
+
+	syslog(LOG_ERR, "%s", last_error);
+}
+
+/* 状态：idle 启动中 / probe 探测中 / login 认证中 / online 已在线 / error 登录失败重试中 */
+static void write_state(const char *state)
+{
+	FILE *f = fopen(state_file, "w");
+
+	if (!f)
+		return;
+
+	fprintf(f, "state=%s\n", state);
+	fprintf(f, "last_error=%s\n", last_error);
+	fprintf(f, "updated=%ld\n", (long)time(NULL));
+	fclose(f);
+}
 
 /* 深澜 ePortal 的 RSA 公钥（e=10001, n=94dd2a86...，pageInfo 实测） */
 #define MODULUS \
@@ -248,9 +287,11 @@ static int login(const char *username, const char *password)
 	char body[2048], login_url[160];
 	int ok = -1;
 
+	write_state("probe");
+
 	resp = probe();
 	if (!resp) {
-		syslog(LOG_ERR, "all probe urls failed");
+		set_error("all probe urls failed");
 		return -1;
 	}
 
@@ -263,20 +304,20 @@ static int login(const char *username, const char *password)
 
 	if (extract(resp, "<script>top.self.location.href='http://",
 		    "/eportal/index.jsp", portal_ip, sizeof(portal_ip)) != 0) {
-		syslog(LOG_ERR, "extract portal_ip failed");
+		set_error("extract portal_ip failed");
 		free(resp);
 		return -1;
 	}
 
 	if (extract(resp, "mac=", "&t=", mac, sizeof(mac)) != 0) {
-		syslog(LOG_ERR, "extract mac failed");
+		set_error("extract mac failed");
 		free(resp);
 		return -1;
 	}
 
 	if (extract(resp, "/eportal/index.jsp?", "'</script>\r\n",
 		    query_string, sizeof(query_string)) != 0) {
-		syslog(LOG_ERR, "extract query_string failed");
+		set_error("extract query_string failed");
 		free(resp);
 		return -1;
 	}
@@ -291,11 +332,18 @@ static int login(const char *username, const char *password)
 	snprintf(login_url, sizeof(login_url),
 		 "http://%s/eportal/InterFace.do?method=login", portal_ip);
 
+	write_state("login");
+
 	login_resp = http_post(login_url, body);
 	if (login_resp) {
 		syslog(LOG_INFO, "login resp: %.200s", login_resp);
 		ok = strstr(login_resp, "success") ? 0 : -1;
+		if (ok != 0)
+			set_error("login rejected: %.160s", login_resp);
 		free(login_resp);
+	}
+	else {
+		set_error("login request failed");
 	}
 
 	free(enc);
@@ -339,7 +387,8 @@ int main(int argc, char **argv)
 
 	if (argc >= 2) {
 		if (read_conf(argv[1], username, password) != 0) {
-			syslog(LOG_ERR, "failed to read config file: %s", argv[1]);
+			set_error("failed to read config file: %s", argv[1]);
+			write_state("error");
 			return 1;
 		}
 	} else {
@@ -352,7 +401,8 @@ int main(int argc, char **argv)
 	}
 
 	if (!username[0] || !password[0]) {
-		syslog(LOG_ERR, "no username/password configured");
+		set_error("no username/password configured");
+		write_state("error");
 		fprintf(stderr,
 			"no username/password. usage: %s [config_file]\n"
 			"  config file: line1=username, line2=password\n"
@@ -363,12 +413,17 @@ int main(int argc, char **argv)
 
 	curl_global_init(CURL_GLOBAL_ALL);
 
+	write_state("idle");
+
 	for (;;) {
 		if (login(username, password) == 0) {
 			syslog(LOG_INFO, "login ok, awaiting");
+			last_error[0] = '\0';
+			write_state("online");
 			sleep(check_interval);
 		} else {
 			syslog(LOG_ERR, "login failed, retry in 1s");
+			write_state("error");
 			sleep(1);
 		}
 	}

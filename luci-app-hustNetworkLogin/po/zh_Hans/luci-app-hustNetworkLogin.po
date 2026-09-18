@@ -15,17 +15,44 @@ msgstr ""
 msgid "Addresses used to check whether the connection is up. Multiple addresses are supported, separated by commas (tried in order); leave empty to use the built-in default."
 msgstr "用于检测是否在线的地址，支持逗号分隔多个（按顺序自动 fallback），留空使用内置默认值。"
 
+msgid "Authenticating"
+msgstr "认证中"
+
 msgid "Check interval (seconds)"
 msgstr "检测间隔（秒）"
 
+msgid "Checking connection"
+msgstr "探测中"
+
+msgid "Connection state"
+msgstr "连接状态"
+
+msgid "Disabled"
+msgstr "已禁用"
+
 msgid "Enable automatic login"
 msgstr "启用自动登录"
+
+msgid "Enabled"
+msgstr "已启用"
 
 msgid "HUST Network Login"
 msgstr "华中科技大学校园网登录"
 
 msgid "Interval between online checks, 15 seconds when left empty."
 msgstr "在线时的检测周期，留空默认 15 秒。"
+
+msgid "Last error"
+msgstr "最近错误"
+
+msgid "Last update"
+msgstr "最后更新"
+
+msgid "Login failed, retrying"
+msgstr "登录失败，重试中"
+
+msgid "Online"
+msgstr "已在线"
 
 msgid "Password"
 msgstr "密码"
@@ -42,17 +69,35 @@ msgstr "重连失败：%s"
 msgid "Restarts the login service so it authenticates again immediately - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
 msgstr "重启登录服务，让它立即重新认证 —— 网络环境变化、或被其它设备挤下线时很有用。刚改过配置请先「保存并应用」。"
 
+msgid "Running"
+msgstr "运行中"
+
 msgid "Service"
 msgstr "服务"
 
+msgid "Service not running"
+msgstr "服务未运行"
+
+msgid "Service status"
+msgstr "服务状态"
+
 msgid "Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it."
 msgstr "深澜 ePortal 认证（华中科技大学校园网）。开启后服务常驻运行，掉线自动重连；保存配置会自动重启服务。"
+
+msgid "Starting"
+msgstr "启动中"
+
+msgid "Stopped"
+msgstr "已停止"
 
 msgid "The login service was restarted and is authenticating again now. Check \"logread | grep -i hust\" for details."
 msgstr "登录服务已重启，正在重新认证。详情见「logread | grep -i hust」。"
 
 msgid "The service is disabled - enable it and apply the settings first."
 msgstr "服务未启用 —— 请先启用并保存配置。"
+
+msgid "The status is written by the login service itself and refreshed every few seconds."
+msgstr "状态由登录服务自己写入，页面每几秒自动刷新。"
 
 msgid "Username"
 msgstr "用户名"

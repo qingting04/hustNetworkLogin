@@ -89,6 +89,15 @@ make package/luci-app-hustNetworkLogin/compile V=s
 
 打开 LuCI（`http://192.168.1.1`）→ **服务 → HUST Network Login**（中文界面下显示为「华中科技大学校园网登录」），填学号、密码，勾选「启用自动登录」，保存。
 
+**状态区**（页面每几秒自动刷新）：
+
+| 项目 | 说明 |
+|------|------|
+| 服务 | 是否启用 · 是否运行中 |
+| 连接状态 | 启动中 / 探测中 / 认证中 / 已在线 / 登录失败，重试中 |
+| 最近错误 | 最近一次失败原因（如 `all probe urls failed`、`login rejected: ...`） |
+| 最后更新 | 守护进程最近一次上报状态的时间 |
+
 **操作按钮**：
 
 | 按钮 | 功能 |
@@ -135,7 +144,9 @@ uci commit hust-network-login && /etc/init.d/hust-network-login reload
 │   ├── Makefile
 │   ├── htdocs/luci-static/resources/view/hustNetworkLogin.js
 │   ├── po/zh_Hans/luci-app-hustNetworkLogin.po   # 中文翻译（英文 msgid → 中文）
-│   └── root/usr/share/luci/menu.d/luci-app-hustNetworkLogin.json
+│   └── root/
+│       ├── usr/share/luci/menu.d/luci-app-hustNetworkLogin.json
+│       └── usr/share/rpcd/acl.d/luci-app-hustNetworkLogin.json   # 权限（uci / rc.init / rc.list / 状态文件）
 └── .github/workflows/build.yml        # GitHub Actions 云端编译
 ```
 
@@ -156,5 +167,6 @@ fork 后按自己路由器改 workflow 顶部 4 个变量（`TARGET` / `SUBTARGE
 
 ## 说明
 
+- **状态来自守护进程**：C 程序会把 `state` / `last_error` / `updated` 写进 `/tmp/run/hust-network-login.state`（tmpfs，重启清空），LuCI 状态区读它；详细过程仍看 syslog：`logread -e hust-network-login`。
 - **包名/显示名是小驼峰 `hustNetworkLogin`**；但 UCI config 名、二进制名、init.d 脚本名保持 kebab-case `hust-network-login`（OpenWrt 系统机制约定）。
 - **LuCI 版本**：JS 框架需 LuCI 23.05+。

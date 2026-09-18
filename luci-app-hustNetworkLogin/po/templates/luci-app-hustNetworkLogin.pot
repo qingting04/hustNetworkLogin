@@ -15,16 +15,43 @@ msgstr ""
 msgid "Addresses used to check whether the connection is up. Multiple addresses are supported, separated by commas (tried in order); leave empty to use the built-in default."
 msgstr ""
 
+msgid "Authenticating"
+msgstr ""
+
 msgid "Check interval (seconds)"
 msgstr ""
 
+msgid "Checking connection"
+msgstr ""
+
+msgid "Connection state"
+msgstr ""
+
+msgid "Disabled"
+msgstr ""
+
 msgid "Enable automatic login"
+msgstr ""
+
+msgid "Enabled"
 msgstr ""
 
 msgid "HUST Network Login"
 msgstr ""
 
 msgid "Interval between online checks, 15 seconds when left empty."
+msgstr ""
+
+msgid "Last error"
+msgstr ""
+
+msgid "Last update"
+msgstr ""
+
+msgid "Login failed, retrying"
+msgstr ""
+
+msgid "Online"
 msgstr ""
 
 msgid "Password"
@@ -42,16 +69,34 @@ msgstr ""
 msgid "Restarts the login service so it authenticates again immediately - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
 msgstr ""
 
+msgid "Running"
+msgstr ""
+
 msgid "Service"
 msgstr ""
 
+msgid "Service not running"
+msgstr ""
+
+msgid "Service status"
+msgstr ""
+
 msgid "Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it."
+msgstr ""
+
+msgid "Starting"
+msgstr ""
+
+msgid "Stopped"
 msgstr ""
 
 msgid "The login service was restarted and is authenticating again now. Check \"logread | grep -i hust\" for details."
 msgstr ""
 
 msgid "The service is disabled - enable it and apply the settings first."
+msgstr ""
+
+msgid "The status is written by the login service itself and refreshed every few seconds."
 msgstr ""
 
 msgid "Username"
