@@ -18,7 +18,10 @@
 /* 在线探测地址：默认用轻量的 captive portal 检测地址（在线时返回 204 空响应），
  * 掉线时同样会被门户拦截并返回带 query string 的页面。
  * 可用环境变量 HUST_NETWORK_LOGIN_TEST_URL 覆盖。 */
-static const char *test_url = "http://connect.rom.miui.com/generate_204";
+static const char *test_url =
+	"http://connect.rom.miui.com/generate_204,"
+	"http://connectivitycheck.platform.hicloud.com/generate_204,"
+	"http://www.baidu.com";
 /* 在线检测间隔（秒），可用环境变量 HUST_NETWORK_LOGIN_CHECK_INTERVAL 覆盖 */
 static int check_interval = 15;
 
@@ -204,6 +207,39 @@ static void trim_crlf(char *s)
 		s[--n] = '\0';
 }
 
+
+/* 依次探测多个候选地址（逗号分隔），返回第一个能连上的响应体（调用者 free），全失败返回 NULL */
+static char *probe(void)
+{
+	const char *p = test_url;
+
+	while (*p) {
+		char url[256];
+		size_t i = 0;
+		char *u, *resp;
+
+		while (*p && *p != ',' && i < sizeof(url) - 1)
+			url[i++] = *p++;
+		url[i] = '\0';
+
+		u = url;
+		while (*u == ' ')
+			u++;
+
+		if (*u) {
+			resp = http_get(u);
+			if (resp)
+				return resp;
+			syslog(LOG_WARNING, "probe %s failed, trying next", u);
+		}
+
+		if (*p == ',')
+			p++;
+	}
+
+	return NULL;
+}
+
 /* 一次登录：返回 0 表示已在线或登录成功，非 0 表示失败 */
 static int login(const char *username, const char *password)
 {
@@ -212,9 +248,9 @@ static int login(const char *username, const char *password)
 	char body[2048], login_url[160];
 	int ok = -1;
 
-	resp = http_get(test_url);
+	resp = probe();
 	if (!resp) {
-		syslog(LOG_ERR, "get %s failed", test_url);
+		syslog(LOG_ERR, "all probe urls failed");
 		return -1;
 	}
 

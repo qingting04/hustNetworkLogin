@@ -22,7 +22,6 @@ return view.extend({
 
 		o = s.option(form.Value, 'username', _('用户名'));
 		o.rmempty = false;
-		o.placeholder = 'M202674581';
 
 		o = s.option(form.Value, 'password', _('密码'));
 		o.rmempty = false;
@@ -30,8 +29,8 @@ return view.extend({
 
 		o = s.option(form.Value, 'test_url', _('探测地址'));
 		o.rmempty = true;
-		o.placeholder = 'http://connect.rom.miui.com/generate_204';
-		o.description = _('用于检测是否在线的地址，留空则用默认值（轻量 204 探测）');
+		o.placeholder = '多个地址用逗号分隔';
+		o.description = _('用于检测是否在线的地址，支持逗号分隔多个（自动 fallback），留空用默认值');
 
 		o = s.option(form.Value, 'check_interval', _('检测间隔（秒）'));
 		o.rmempty = true;

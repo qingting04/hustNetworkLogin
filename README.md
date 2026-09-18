@@ -87,7 +87,7 @@ make package/luci-app-hustNetworkLogin/compile V=s
 命令行等价：
 
 ```sh
-uci set hust-network-login.main.username='M202674581'
+uci set hust-network-login.main.username='M2020123123'
 uci set hust-network-login.main.password='你的密码'
 uci set hust-network-login.main.enabled='1'
 uci commit hust-network-login && /etc/init.d/hust-network-login reload
