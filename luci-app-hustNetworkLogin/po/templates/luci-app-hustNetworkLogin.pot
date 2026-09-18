@@ -33,7 +33,25 @@ msgstr ""
 msgid "Probe URL"
 msgstr ""
 
+msgid "Reconnect"
+msgstr ""
+
+msgid "Reconnect failed: %s"
+msgstr ""
+
+msgid "Restarts the login service so it authenticates again immediately - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
+msgstr ""
+
+msgid "Service"
+msgstr ""
+
 msgid "Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it."
+msgstr ""
+
+msgid "The login service was restarted and is authenticating again now. Check \"logread | grep -i hust\" for details."
+msgstr ""
+
+msgid "The service is disabled - enable it and apply the settings first."
 msgstr ""
 
 msgid "Username"

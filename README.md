@@ -89,6 +89,14 @@ make package/luci-app-hustNetworkLogin/compile V=s
 
 打开 LuCI（`http://192.168.1.1`）→ **服务 → HUST Network Login**（中文界面下显示为「华中科技大学校园网登录」），填学号、密码，勾选「启用自动登录」，保存。
 
+**操作按钮**：
+
+| 按钮 | 功能 |
+|------|------|
+| 重连 | 重启登录服务（`/etc/init.d/hust-network-login reload` = stop + start），立即重新认证；被其它设备挤下线、或换了网络环境时用 |
+
+> 服务未启用时点「重连」会提示先启用并保存配置。刚改过配置请先「保存并应用」，重连用的是已保存的配置。
+
 命令行等价：
 
 ```sh

@@ -33,8 +33,26 @@ msgstr "密码"
 msgid "Probe URL"
 msgstr "探测地址"
 
+msgid "Reconnect"
+msgstr "重连"
+
+msgid "Reconnect failed: %s"
+msgstr "重连失败：%s"
+
+msgid "Restarts the login service so it authenticates again immediately - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
+msgstr "重启登录服务，让它立即重新认证 —— 网络环境变化、或被其它设备挤下线时很有用。刚改过配置请先「保存并应用」。"
+
+msgid "Service"
+msgstr "服务"
+
 msgid "Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it."
 msgstr "深澜 ePortal 认证（华中科技大学校园网）。开启后服务常驻运行，掉线自动重连；保存配置会自动重启服务。"
+
+msgid "The login service was restarted and is authenticating again now. Check \"logread | grep -i hust\" for details."
+msgstr "登录服务已重启，正在重新认证。详情见「logread | grep -i hust」。"
+
+msgid "The service is disabled - enable it and apply the settings first."
+msgstr "服务未启用 —— 请先启用并保存配置。"
 
 msgid "Username"
 msgstr "用户名"
