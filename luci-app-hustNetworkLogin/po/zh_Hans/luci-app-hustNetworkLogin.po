@@ -66,17 +66,14 @@ msgstr "重连"
 msgid "Reconnect failed: %s"
 msgstr "重连失败：%s"
 
-msgid "Restarts the login service so it authenticates again immediately - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
-msgstr "重启登录服务，让它立即重新认证 —— 网络环境变化、或被其它设备挤下线时很有用。刚改过配置请先「保存并应用」。"
+msgid "Restarts the authentication immediately (the daemon is signalled, it is not restarted) - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
+msgstr "立即触发一次重新认证（靠信号通知守护进程，不重启进程）—— 网络环境变化、或被其它设备挤下线时很有用。刚改过配置请先「保存并应用」。"
 
 msgid "Running"
 msgstr "运行中"
 
 msgid "Service"
 msgstr "服务"
-
-msgid "Service not running"
-msgstr "服务未运行"
 
 msgid "Service status"
 msgstr "服务状态"
@@ -90,8 +87,8 @@ msgstr "启动中"
 msgid "Stopped"
 msgstr "已停止"
 
-msgid "The login service was restarted and is authenticating again now. Check \"logread | grep -i hust\" for details."
-msgstr "登录服务已重启，正在重新认证。详情见「logread | grep -i hust」。"
+msgid "The login service is authenticating again now (requested by %s). Check \"logread | grep -i hust\" for details."
+msgstr "登录服务正在重新认证（触发方式：%s）。详情见「logread | grep -i hust」。"
 
 msgid "The service is disabled - enable it and apply the settings first."
 msgstr "服务未启用 —— 请先启用并保存配置。"
@@ -99,9 +96,15 @@ msgstr "服务未启用 —— 请先启用并保存配置。"
 msgid "The status is written by the login service itself and refreshed every few seconds."
 msgstr "状态由登录服务自己写入，页面每几秒自动刷新。"
 
+msgid "Unknown"
+msgstr "未知"
+
 msgid "Username"
 msgstr "用户名"
 
 msgid "comma separated, multiple allowed"
 msgstr "多个地址用逗号分隔"
+
+msgid "unknown error"
+msgstr "未知错误"
 

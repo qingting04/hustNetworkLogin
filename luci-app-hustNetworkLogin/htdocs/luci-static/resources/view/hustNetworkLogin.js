@@ -1,5 +1,4 @@
 'use strict';
-'require fs';
 'require form';
 'require poll';
 'require rpc';
@@ -8,55 +7,34 @@
 'require view';
 
 /*
- * 状态来源：
- *   - 连接状态 / 最近错误 / 最后更新：守护进程写的小文件
- *     /tmp/run/hust-network-login.state（state / last_error / updated）
- *   - 服务是否启用 / 运行：rpcd 的 rc.list
- *
- * 重连：守护进程没有 ubus 控制接口也不处理信号，所以「重连」= 重启服务
- * （/etc/init.d/hust-network-login reload 实现为 stop + start，进程起来即重新认证）。
- * rc.init 是 rpcd 提供的标准接口，会校验脚本名并只允许
- * enable/disable/start/stop/restart/reload。
+ * 状态与控制都走 ubus 对象 hust-network-login（由 rpcd 的 ucode 插件提供）：
+ *   status    → { state, last_error, updated, running, pid, enabled }
+ *   reconnect → 让守护进程立刻重新认证（SIGHUP，不重启进程）
+ * 字段命名与 jluNetworkLogin 的 ubus status 对齐。
  */
-var STATE_FILE = '/tmp/run/hust-network-login.state';
-var SERVICE = 'hust-network-login';
-
-var callInitAction = rpc.declare({
-	object: 'rc',
-	method: 'init',
-	params: [ 'name', 'action' ]
-});
-
-var callInitList = rpc.declare({
-	object: 'rc',
-	method: 'list',
-	params: [ 'name' ],
+var callStatus = rpc.declare({
+	object: 'hust-network-login',
+	method: 'status',
 	expect: { '': {} }
 });
 
-function parse_state(text) {
-	var out = {};
-
-	(text || '').split('\n').forEach(function(line) {
-		var m = line.match(/^([a-z_]+)=(.*)$/);
-
-		if (m)
-			out[m[1]] = m[2];
-	});
-
-	return out;
-}
+var callReconnect = rpc.declare({
+	object: 'hust-network-login',
+	method: 'reconnect',
+	expect: { result: false, error: '', action: '' }
+});
 
 function state_label(state) {
 	switch (state) {
-	case 'idle':   return _('Starting');
-	case 'probe':  return _('Checking connection');
-	case 'login':  return _('Authenticating');
-	case 'online': return _('Online');
-	case 'error':  return _('Login failed, retrying');
+	case 'idle':    return _('Starting');
+	case 'probe':   return _('Checking connection');
+	case 'login':   return _('Authenticating');
+	case 'online':  return _('Online');
+	case 'error':   return _('Login failed, retrying');
+	case 'stopped': return _('Stopped');
 	}
 
-	return '-';
+	return _('Unknown');
 }
 
 function row(label, node) {
@@ -90,9 +68,15 @@ return view.extend({
 
 		btn.disabled = true;
 
-		return callInitAction(SERVICE, 'reload').then(function() {
-			ui.addNotification(_('Reconnect'),
-				E('p', [ _('The login service was restarted and is authenticating again now. Check "logread | grep -i hust" for details.') ]), 'info');
+		return callReconnect().then(function(res) {
+			if (res && res.result) {
+				ui.addNotification(_('Reconnect'),
+					E('p', [ _('The login service is authenticating again now (requested by %s). Check "logread | grep -i hust" for details.').format(res.action || 'signal') ]), 'info');
+			}
+			else {
+				ui.addNotification(_('Reconnect'),
+					E('p', [ _('Reconnect failed: %s').format((res && res.error) || _('unknown error')) ]), 'warning');
+			}
 		}).catch(function(e) {
 			ui.addNotification(_('Reconnect'),
 				E('p', [ _('Reconnect failed: %s').format(String(e)) ]), 'warning');
@@ -102,31 +86,23 @@ return view.extend({
 		}.bind(this));
 	},
 
-	/* 读取状态文件 + 服务启用/运行状态，刷新状态区 */
 	refresh_status: function() {
-		return Promise.all([
-			fs.read(STATE_FILE).catch(function() { return null; }),
-			callInitList(SERVICE).catch(function() { return null; })
-		]).then(function(res) {
-			var st = parse_state(res[0]);
-			var svc = (res[1] || {})[SERVICE] || null;
-			var running = svc ? (svc.running == true || svc.running == 1) : null;
-
-			if (svc)
-				set_text('hust-status-service',
-					(svc.enabled ? _('Enabled') : _('Disabled')) + ' · ' +
-					(running ? _('Running') : _('Stopped')));
-			else
+		return callStatus().catch(function() { return null; }).then(function(st) {
+			if (!st) {
 				set_text('hust-status-service', '-');
+				set_text('hust-status-state', _('Unknown'));
+				set_text('hust-status-error', '-');
+				set_text('hust-status-updated', '-');
+				return;
+			}
 
-			if (st.state)
-				set_text('hust-status-state', state_label(st.state));
-			else
-				set_text('hust-status-state', running === false ? _('Service not running') : '-');
-
+			set_text('hust-status-service',
+				(st.enabled ? _('Enabled') : _('Disabled')) + ' · ' +
+				(st.running ? _('Running') : _('Stopped')) + (st.running ? ' (pid %d)'.format(st.pid) : ''));
+			set_text('hust-status-state', state_label(st.state));
 			set_text('hust-status-error', st.last_error || '-');
 			set_text('hust-status-updated',
-				st.updated ? new Date(parseInt(st.updated, 10) * 1000).toLocaleString() : '-');
+				st.updated ? new Date(st.updated * 1000).toLocaleString() : '-');
 		});
 	},
 
@@ -176,7 +152,7 @@ return view.extend({
 					}, [ _('Reconnect') ])
 				]),
 				E('p', { 'class': 'cbi-section-descr' }, [
-					_('Restarts the login service so it authenticates again immediately - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them.'),
+					_('Restarts the authentication immediately (the daemon is signalled, it is not restarted) - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them.'),
 					' ',
 					_('The status is written by the login service itself and refreshed every few seconds.')
 				])

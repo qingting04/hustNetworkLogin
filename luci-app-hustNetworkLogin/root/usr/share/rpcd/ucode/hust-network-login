@@ -1,0 +1,148 @@
+'use strict';
+
+/*
+ * rpcd ucode plugin - ubus object "hust-network-login".
+ *
+ *   ubus call hust-network-login status     连接状态 + 最近错误 + 服务启用/运行情况
+ *   ubus call hust-network-login reconnect  立刻重新认证（SIGHUP，不重启进程；不在运行则启动）
+ *
+ * 为什么在这里而不是守护进程里：守护进程是「同步探测 + 登录」的简单循环，
+ * 要做成 ubus 服务端就得引入事件循环（uloop + curl multi）并改动认证流程。
+ * 控制面放在 rpcd 插件里，既拿到了真正的 ubus 接口（脚本、其它服务、LuCI 都能调），
+ * 又不用碰那段已逐字节验证过的登录/加密代码。
+ *
+ * status 的字段命名与 jluNetworkLogin 的 ubus status 对齐（state / last_error / ...）。
+ */
+
+import { readfile, readlink, popen } from 'fs';
+import { cursor } from 'uci';
+
+const STATE_FILE = '/tmp/run/hust-network-login.state';
+const PID_FILE = '/tmp/run/hust-network-login.pid';
+const PROG = '/usr/bin/hust-network-login';
+const INIT = '/etc/init.d/hust-network-login';
+const CONFIG = 'hust-network-login';
+
+/* 解析守护进程写的 "state=online\nlast_error=...\nupdated=1789..." */
+function parse_state(text) {
+	let out = {};
+
+	for (let line in split(trim(text ?? ''), '\n')) {
+		let kv = split(line, '=');
+
+		if (length(kv) >= 2)
+			out[kv[0]] = join('=', slice(kv, 1, length(kv)));
+	}
+
+	return out;
+}
+
+function read_state() {
+	try {
+		return parse_state(readfile(STATE_FILE));
+	}
+	catch (e) {
+		return {};
+	}
+}
+
+/* 守护进程还在不在？比对 /proc/<pid>/exe，避免 PID 复用认错进程 */
+function current_pid() {
+	let pid;
+
+	try {
+		pid = +trim(readfile(PID_FILE));
+	}
+	catch (e) {
+		return null;
+	}
+
+	if (!pid)
+		return null;
+
+	try {
+		if (readlink(sprintf('/proc/%d/exe', pid)) != PROG)
+			return null;
+	}
+	catch (e) {
+		return null;
+	}
+
+	return pid;
+}
+
+function service_enabled() {
+	try {
+		let c = cursor();
+
+		c.load(CONFIG);
+
+		return (c.get(CONFIG, 'main', 'enabled') ?? '0') == '1';
+	}
+	catch (e) {
+		return false;
+	}
+}
+
+/* 跑一条命令，返回退出码（-1 表示没能执行） */
+function run(cmd) {
+	let fd, rc;
+
+	try {
+		fd = popen(cmd);
+
+		if (!fd)
+			return -1;
+
+		rc = fd.close();
+	}
+	catch (e) {
+		return -1;
+	}
+
+	return (type(rc) == 'int') ? rc : 0;
+}
+
+return {
+	'hust-network-login': {
+		status: {
+			call: function() {
+				let st = read_state();
+				let pid = current_pid();
+				let updated = st.updated;
+
+				if (type(updated) != 'string' || !match(updated, /^[0-9]+$/))
+					updated = 0;
+
+				return {
+					state: st.state ?? (pid != null ? 'unknown' : 'stopped'),
+					last_error: st.last_error ?? '',
+					updated: +updated,
+					running: pid != null,
+					pid: pid ?? 0,
+					enabled: service_enabled()
+				};
+			}
+		},
+
+		reconnect: {
+			call: function() {
+				let pid = current_pid();
+				let rc;
+
+				if (pid != null) {
+					rc = run(sprintf('kill -HUP %d', pid));
+
+					return { result: rc == 0, action: 'signal', pid: pid };
+				}
+
+				if (!service_enabled())
+					return { result: false, action: 'none', pid: 0, error: 'service disabled' };
+
+				rc = run(sprintf('%s start', INIT));
+
+				return { result: rc == 0, action: 'start', pid: current_pid() ?? 0 };
+			}
+		}
+	}
+};

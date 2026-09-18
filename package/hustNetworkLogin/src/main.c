@@ -7,7 +7,10 @@
  *       或命令行传配置文件路径（两行：第一行用户名，第二行密码）。
  *
  * 状态上报：把 state / last_error / updated 写入 /tmp/run/hust-network-login.state，
- *           供 LuCI 页面（luci-app-hustNetworkLogin）轮询显示。
+ *           供 LuCI 页面（luci-app-hustNetworkLogin，经 rpcd 的 ubus 对象）读取；
+ *           PID 另写 /tmp/run/hust-network-login.pid。
+ * 控制：SIGHUP = 中断当前 HTTP 传输并立刻重新认证（重连，不重启进程）；
+ *       SIGTERM/SIGINT = 干净退出（写 state=stopped、删 pidfile）。
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +18,7 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <stdarg.h>
+#include <signal.h>
 #include <time.h>
 #include <ctype.h>
 #include <curl/curl.h>
@@ -36,12 +40,36 @@ static int check_interval = 15;
  * （rpcd 读文件时会 realpath 后再校验 ACL，所以这里用没有符号链接的 /tmp/run）。
  */
 static const char *state_file = "/tmp/run/hust-network-login.state";
+static const char *pid_file = "/tmp/run/hust-network-login.pid";
 static char last_error[224];
 
-/* 记录最近一次错误：既进 syslog，也留给 Web 界面显示 */
+/*
+ * 控制标志（只由信号处理函数写入，async-signal-safe）：
+ *   g_stop      SIGTERM/SIGINT → 干净退出
+ *   g_reconnect SIGHUP         → 中断当前 HTTP 传输并立刻重新认证
+ * 于是「重连」不需要重启进程，init 脚本/procd/LuCI 都能秒级触发。
+ */
+static volatile sig_atomic_t g_stop = 0;
+static volatile sig_atomic_t g_reconnect = 0;
+
+static void sig_handler(int sig)
+{
+	if (sig == SIGHUP)
+		g_reconnect = 1;
+	else
+		g_stop = 1;
+}
+
+/*
+ * 记录最近一次错误：既进 syslog，也留给 Web 界面显示。
+ * 被手动重连（SIGHUP）打断的传输不算错误，直接忽略。
+ */
 static void set_error(const char *fmt, ...)
 {
 	va_list ap;
+
+	if (g_reconnect)
+		return;
 
 	va_start(ap, fmt);
 	vsnprintf(last_error, sizeof(last_error), fmt, ap);
@@ -50,11 +78,16 @@ static void set_error(const char *fmt, ...)
 	syslog(LOG_ERR, "%s", last_error);
 }
 
-/* 状态：idle 启动中 / probe 探测中 / login 认证中 / online 已在线 / error 登录失败重试中 */
+/* 状态：idle 启动中 / probe 探测中 / login 认证中 / online 已在线 / error 登录失败重试中 / stopped 已停止
+ * 先写临时文件再 rename，避免界面读到写了一半的内容 */
 static void write_state(const char *state)
 {
-	FILE *f = fopen(state_file, "w");
+	char tmp[sizeof("/tmp/run/hust-network-login.state.tmp")];
+	FILE *f;
 
+	snprintf(tmp, sizeof(tmp), "%s.tmp", state_file);
+
+	f = fopen(tmp, "w");
 	if (!f)
 		return;
 
@@ -62,6 +95,35 @@ static void write_state(const char *state)
 	fprintf(f, "last_error=%s\n", last_error);
 	fprintf(f, "updated=%ld\n", (long)time(NULL));
 	fclose(f);
+
+	rename(tmp, state_file);
+}
+
+/* procd 之外也让 init 脚本/其它工具能找到 PID（SIGHUP 重连用） */
+static void write_pidfile(void)
+{
+	FILE *f = fopen(pid_file, "w");
+
+	if (!f)
+		return;
+
+	fprintf(f, "%ld\n", (long)getpid());
+	fclose(f);
+}
+
+/* 可被打断的睡眠：被 SIGHUP/SIGTERM 打断就立刻返回 */
+static void sleep_interruptible(int seconds)
+{
+	while (seconds > 0 && !g_stop && !g_reconnect)
+		seconds = sleep((unsigned int)seconds);
+}
+
+/* libcurl 进度回调：非 0 表示中断传输（手动重连时让正在飞的请求立刻收摊） */
+static int xferinfo_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
+		       curl_off_t ultotal, curl_off_t ulnow)
+{
+	(void)p, (void)dltotal, (void)dlnow, (void)ultotal, (void)ulnow;
+	return g_reconnect ? 1 : 0;
 }
 
 /* 深澜 ePortal 的 RSA 公钥（e=10001, n=94dd2a86...，pageInfo 实测） */
@@ -105,7 +167,10 @@ static char *http_get(const char *url)
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_cb);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "hust-network-login");
 
 	if (curl_easy_perform(curl) == CURLE_OK) {
@@ -141,7 +206,10 @@ static char *http_post(const char *url, const char *body)
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_cb);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "hust-network-login");
 
 	if (curl_easy_perform(curl) == CURLE_OK && buf.data)
@@ -373,6 +441,20 @@ int main(int argc, char **argv)
 
 	openlog("hust-network-login", LOG_PID | LOG_NDELAY, LOG_DAEMON);
 
+	/* SIGTERM/SIGINT = 干净退出；SIGHUP = 中断当前请求并立刻重新认证（重连不重启进程） */
+	{
+		struct sigaction sa;
+
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = sig_handler;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0; /* 不设 SA_RESTART，让 sleep() 能被打断 */
+
+		sigaction(SIGHUP, &sa, NULL);
+		sigaction(SIGTERM, &sa, NULL);
+		sigaction(SIGINT, &sa, NULL);
+	}
+
 	{
 		const char *tu = getenv("HUST_NETWORK_LOGIN_TEST_URL");
 		const char *ci = getenv("HUST_NETWORK_LOGIN_CHECK_INTERVAL");
@@ -413,22 +495,37 @@ int main(int argc, char **argv)
 
 	curl_global_init(CURL_GLOBAL_ALL);
 
+	write_pidfile();
 	write_state("idle");
 
-	for (;;) {
-		if (login(username, password) == 0) {
+	while (!g_stop) {
+		int rc;
+
+		g_reconnect = 0; /* 消费掉上一次重连请求 */
+		rc = login(username, password);
+
+		if (g_stop)
+			break;
+
+		if (rc == 0) {
 			syslog(LOG_INFO, "login ok, awaiting");
 			last_error[0] = '\0';
 			write_state("online");
-			sleep(check_interval);
+			sleep_interruptible(check_interval);
+		} else if (g_reconnect) {
+			/* 手动重连打断的，不是错误：立刻进入下一轮 */
+			syslog(LOG_INFO, "reconnect requested, restarting cycle");
 		} else {
 			syslog(LOG_ERR, "login failed, retry in 1s");
 			write_state("error");
-			sleep(1);
+			sleep_interruptible(1);
 		}
 	}
 
-	/* unreachable */
+	write_state("stopped");
+	unlink(pid_file);
 	curl_global_cleanup();
+	syslog(LOG_INFO, "stopped");
+	closelog();
 	return 0;
 }

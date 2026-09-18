@@ -66,16 +66,13 @@ msgstr ""
 msgid "Reconnect failed: %s"
 msgstr ""
 
-msgid "Restarts the login service so it authenticates again immediately - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
+msgid "Restarts the authentication immediately (the daemon is signalled, it is not restarted) - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
 msgstr ""
 
 msgid "Running"
 msgstr ""
 
 msgid "Service"
-msgstr ""
-
-msgid "Service not running"
 msgstr ""
 
 msgid "Service status"
@@ -90,7 +87,7 @@ msgstr ""
 msgid "Stopped"
 msgstr ""
 
-msgid "The login service was restarted and is authenticating again now. Check \"logread | grep -i hust\" for details."
+msgid "The login service is authenticating again now (requested by %s). Check \"logread | grep -i hust\" for details."
 msgstr ""
 
 msgid "The service is disabled - enable it and apply the settings first."
@@ -99,9 +96,15 @@ msgstr ""
 msgid "The status is written by the login service itself and refreshed every few seconds."
 msgstr ""
 
+msgid "Unknown"
+msgstr ""
+
 msgid "Username"
 msgstr ""
 
 msgid "comma separated, multiple allowed"
+msgstr ""
+
+msgid "unknown error"
 msgstr ""
 

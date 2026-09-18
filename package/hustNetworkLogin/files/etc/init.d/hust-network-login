@@ -1,6 +1,13 @@
 #!/bin/sh /etc/rc.common
 # HUST 校园网自动登录 - procd 服务脚本
 # 读取 /etc/config/hust-network-login，用环境变量启动登录程序（C 实现）
+#
+# 控制语义：
+#   start / stop      正常启停（procd 托管）
+#   reload            进程在运行 → 发 SIGHUP，让它中断当前请求并立刻重新认证
+#                     （不重启进程）；进程不在 → 走正常 start
+#   所以 `uci commit` 触发的 procd reload、`rc.init reload`、LuCI 的「重连」按钮
+#   都是秒级重连，而不是杀进程重启。
 
 USE_PROCD=1
 START=90
@@ -8,6 +15,7 @@ STOP=10
 
 PROG="/usr/bin/hust-network-login"
 CONFIG="hust-network-login"
+PIDFILE="/tmp/run/hust-network-login.pid"
 
 start_service() {
 	local enabled username password test_url check_interval
@@ -39,6 +47,19 @@ service_triggers() {
 }
 
 reload_service() {
+	local pid
+
+	pid=$(cat "$PIDFILE" 2>/dev/null)
+
+	# 校验 /proc/<pid>/exe 确实是我们的守护进程，避免 PID 复用导致误发信号
+	if [ -n "$pid" ] && [ -d "/proc/$pid" ] &&
+	   [ "$(readlink /proc/$pid/exe 2>/dev/null)" = "$PROG" ]; then
+		logger -t hust-network-login "reload: reconnect via SIGHUP (pid $pid)"
+		kill -HUP "$pid" 2>/dev/null
+		return 0
+	fi
+
+	logger -t hust-network-login "reload: service not running, starting it"
 	stop
 	start
 }
