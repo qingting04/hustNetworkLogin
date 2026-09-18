@@ -115,11 +115,18 @@ return view.extend({
 		o.rmempty = false;
 		o.password = true;
 
+		/* 默认值必须与守护进程内置默认（src/main.c 的 test_url）和
+		 * /etc/config/hust-network-login 的出厂默认保持一致；这里显式给出，
+		 * 老配置里没有这一项时输入框也会显示实际使用的地址列表。 */
 		o = s.option(form.Value, 'test_url', _('Probe URL'));
+		o.default = 'http://connect.rom.miui.com/generate_204,' +
+			'http://connectivitycheck.platform.hicloud.com/generate_204,' +
+			'http://www.baidu.com';
 		o.rmempty = true;
 		o.placeholder = _('comma separated, multiple allowed');
 
 		o = s.option(form.Value, 'check_interval', _('Check interval (seconds)'));
+		o.default = '15';
 		o.rmempty = true;
 		o.datatype = 'uinteger';
 		o.placeholder = '15';
