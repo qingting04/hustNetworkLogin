@@ -7,7 +7,7 @@
 #   reload            重新启动服务，让新的配置（用户名/密码/探测地址/检测周期，都通过
 #                     环境变量传给进程）生效 —— `uci commit` 触发的 procd reload 走这条
 #   想「不改配置、立刻重新认证」请用 ubus：ubus call hust-network-login reconnect
-#   （rpcd 插件会给守护进程发 SIGHUP，中断当前请求并马上重跑一轮，不重启进程）
+#   （ubus 的 reconnect 会给 worker 线程发 SIGHUP，中断当前请求并马上重跑一轮，不重启进程）
 
 USE_PROCD=1
 START=90

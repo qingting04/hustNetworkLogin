@@ -7,7 +7,8 @@
 'require view';
 
 /*
- * 状态与控制都走 ubus 对象 hust-network-login（由 rpcd 的 ucode 插件提供）：
+ * 状态与控制都走 ubus 对象 hust-network-login（由 C 守护进程自己注册，
+ * 不再依赖 rpcd 的 ucode 插件）：
  *   status    → { state, last_error, updated, running, pid, enabled }
  *   reconnect → 让守护进程立刻重新认证（SIGHUP，不重启进程）
  * 字段命名与 jluNetworkLogin 的 ubus status 对齐。

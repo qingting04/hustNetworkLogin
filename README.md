@@ -17,7 +17,7 @@
 - 纯 C 实现（`libcurl` + `libopenssl`），OpenWrt 原生交叉编译
 - 掉线 15 秒检测并自动重连
 - LuCI 网页配置（JS 框架，需 LuCI 23.05+，ImmortalWrt 23.05/25.x 均支持）
-- **ubus 接口**：`ubus call hust-network-login status` / `reconnect`（由 rpcd 的 ucode 插件提供），脚本或其它服务也能调
+- **ubus 接口**：`ubus call hust-network-login status` / `reconnect`（**由 C 守护进程自己注册，不需要 rpcd 插件**），脚本或其它服务也能调
 - 界面文案走 LuCI 标准 i18n：英文 msgid + `po/zh_Hans` 翻译包，中文界面由 `luci-i18n-hustNetworkLogin-zh-cn` 提供
 - GitHub Actions 云端编译，本地零环境
 
@@ -154,8 +154,7 @@ uci commit hust-network-login && /etc/init.d/hust-network-login reload
 │   ├── po/zh_Hans/luci-app-hustNetworkLogin.po   # 中文翻译（英文 msgid → 中文）
 │   └── root/
 │       ├── usr/share/luci/menu.d/luci-app-hustNetworkLogin.json
-│       ├── usr/share/rpcd/ucode/hust-network-login    # ubus 对象：status / reconnect（rpcd ucode 插件）
-│       └── usr/share/rpcd/acl.d/luci-app-hustNetworkLogin.json   # 权限（uci + ubus status/reconnect）
+│       ├── usr/share/rpcd/acl.d/luci-app-hustNetworkLogin.json   # 权限（uci + ubus status/reconnect）
 └── .github/workflows/build.yml        # GitHub Actions 云端编译
 ```
 
@@ -176,7 +175,7 @@ fork 后按自己路由器改 workflow 顶部 4 个变量（`TARGET` / `SUBTARGE
 
 ## 说明
 
-- **状态与控制的实现**：C 守护进程把 `state` / `last_error` / `updated` 原子写入 `/tmp/run/hust-network-login.state`（tmpfs，重启清空）、PID 写入 `/tmp/run/hust-network-login.pid`；rpcd 的 ucode 插件把它包装成 ubus 对象 `hust-network-login`（`status` / `reconnect`），界面和脚本都调它。
+- **状态与控制的实现**：C 守护进程自己注册 ubus 对象 `hust-network-login`（`uloop` + `libubus`，方法 `status` / `reconnect`）。登录循环跑在单独的 worker 线程，主线程只跑事件循环 —— 所以**进程在，对象就在**，不需要 rpcd 的 ucode 插件（那类插件一旦没加载，页面就彻底失能而且看不出原因）。`reconnect` 用 `pthread_kill(worker, SIGHUP)` 复用现成的打断链路（`CURLOPT_XFERINFOFUNCTION` 中止传输 + `sleep_interruptible` 提前返回），秒级生效、不重启进程、认证与加密代码零改动。状态同时原子写入 `/tmp/run/hust-network-login.state`（tmpfs，重启清空）供 SSH 直接查看，PID 写 `/tmp/run/hust-network-login.pid`。
 - **两条路径别混**：① 只想立刻重新认证（配置没变）→ 界面「重连」/ `ubus call hust-network-login reconnect`，守护进程收到 `SIGHUP`，经 libcurl 进度回调中断当前请求并马上重跑一轮（**不重启进程**）；② 改了配置（账号/密码/探测地址/检测周期）→ 「保存并应用」或 `uci commit ... && /etc/init.d/hust-network-login reload`，这条会**重启服务**，因为配置是启动时通过环境变量注入进程的。`SIGTERM`/`SIGINT` 会写 `state=stopped`、删 pidfile 后干净退出（配合 procd）。详细过程看 syslog：`logread -e hust-network-login`。
 - **包名/显示名是小驼峰 `hustNetworkLogin`**；但 UCI config 名、二进制名、init.d 脚本名保持 kebab-case `hust-network-login`（OpenWrt 系统机制约定）。
 - **LuCI 版本**：JS 框架需 LuCI 23.05+。

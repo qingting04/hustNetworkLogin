@@ -6,11 +6,14 @@
  * 配置：环境变量 HUST_NETWORK_LOGIN_USERNAME / HUST_NETWORK_LOGIN_PASSWORD，
  *       或命令行传配置文件路径（两行：第一行用户名，第二行密码）。
  *
- * 状态上报：把 state / last_error / updated 写入 /tmp/run/hust-network-login.state，
- *           供 LuCI 页面（luci-app-hustNetworkLogin，经 rpcd 的 ubus 对象）读取；
- *           PID 另写 /tmp/run/hust-network-login.pid。
+ * 状态上报：把 state / last_error / updated 写入 /tmp/run/hust-network-login.state
+ *           （SSH 里 cat 就能看），PID 另写 /tmp/run/hust-network-login.pid。
+ * 控制面：进程自己注册 ubus 对象 hust-network-login（uloop + libubus），
+ *       页面与脚本直接 `ubus call hust-network-login status|reconnect`，
+ *       不再依赖 rpcd 的 ucode 插件（插件加载失败会让页面彻底失能）。
+ *       登录循环跑在单独的 worker 线程，主线程只跑 uloop 事件循环。
  * 控制：SIGHUP = 中断当前 HTTP 传输并立刻重新认证（重连，不重启进程）；
- *       SIGTERM/SIGINT = 干净退出（写 state=stopped、删 pidfile）。
+ *       SIGTERM/SIGINT = 干净退出（写 state=stopped、删 pidfile、注销 ubus 对象）。
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,8 +24,12 @@
 #include <signal.h>
 #include <time.h>
 #include <ctype.h>
+#include <pthread.h>
 #include <curl/curl.h>
 #include <openssl/bn.h>
+#include <libubox/utils.h>
+#include <libubox/blobmsg.h>
+#include <libubus.h>
 
 /* 在线探测地址：默认用轻量的 captive portal 检测地址（在线时返回 204 空响应），
  * 掉线时同样会被门户拦截并返回带 query string 的页面。
@@ -35,9 +42,9 @@ static const char *test_url =
 static int check_interval = 15;
 
 /*
- * 运行状态上报：把状态与最近一次错误写进一个小文件，供 LuCI 界面轮询显示。
- * 路径要和 luci-app-hustNetworkLogin 的 acl.d 里声明的路径完全一致
- * （rpcd 读文件时会 realpath 后再校验 ACL，所以这里用没有符号链接的 /tmp/run）。
+ * 运行状态上报：把状态与最近一次错误写进一个小文件，SSH 里直接 cat 就能看
+ * （ubus 的 status 走内存快照，不读这个文件）。路径选没符号链接的 /tmp/run，
+ * 是为了让脚本/工具做 realpath 校验时不会踩到 /tmp 下的软链。
  */
 static const char *state_file = "/tmp/run/hust-network-login.state";
 static const char *pid_file = "/tmp/run/hust-network-login.pid";
@@ -51,6 +58,22 @@ static char last_error[224];
  */
 static volatile sig_atomic_t g_stop = 0;
 static volatile sig_atomic_t g_reconnect = 0;
+
+/* 凭据（worker 线程用，主线程启动时填好） */
+static char username[128] = {0};
+static char password[128] = {0};
+
+/*
+ * 共享状态快照：worker 线程写、ubus 回调（主线程）读，全部在 st_lock 里访问。
+ * 临界区只做内存拷贝，不做任何 I/O，不会阻塞登录循环。
+ */
+static pthread_mutex_t st_lock = PTHREAD_MUTEX_INITIALIZER;
+static char st_state[16] = "idle";
+static char st_ubus[16] = "init";
+static long st_updated = 0;
+
+static pthread_t worker_tid;
+static struct ubus_context *ubus_ctx = NULL;
 
 static void sig_handler(int sig)
 {
@@ -66,24 +89,44 @@ static void sig_handler(int sig)
  */
 static void set_error(const char *fmt, ...)
 {
+	char buf[sizeof(last_error)];
 	va_list ap;
 
 	if (g_reconnect)
 		return;
 
 	va_start(ap, fmt);
-	vsnprintf(last_error, sizeof(last_error), fmt, ap);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 
-	syslog(LOG_ERR, "%s", last_error);
+	pthread_mutex_lock(&st_lock);
+	memcpy(last_error, buf, sizeof(last_error));
+	pthread_mutex_unlock(&st_lock);
+
+	syslog(LOG_ERR, "%s", buf);
 }
 
-/* 状态：idle 启动中 / probe 探测中 / login 认证中 / online 已在线 / error 登录失败重试中 / stopped 已停止
- * 先写临时文件再 rename，避免界面读到写了一半的内容 */
-static void write_state(const char *state)
+/*
+ * 把内存快照原子落盘：先写临时文件再 rename，避免读到写了一半的内容。
+ * 文件是给人和脚本（SSH）看的；ubus 的 status 走内存快照，不读这个文件。
+ * 状态：idle 启动中 / probe 探测中 / login 认证中 / online 已在线 /
+ *       error 登录失败重试中 / stopped 已停止
+ */
+static void flush_state_file(void)
 {
+	char state[sizeof(st_state)];
+	char err[sizeof(last_error)];
+	char ub[sizeof(st_ubus)];
 	char tmp[sizeof("/tmp/run/hust-network-login.state.tmp")];
 	FILE *f;
+	long now;
+
+	pthread_mutex_lock(&st_lock);
+	snprintf(state, sizeof(state), "%s", st_state);
+	snprintf(err, sizeof(err), "%s", last_error);
+	snprintf(ub, sizeof(ub), "%s", st_ubus);
+	now = st_updated;
+	pthread_mutex_unlock(&st_lock);
 
 	snprintf(tmp, sizeof(tmp), "%s.tmp", state_file);
 
@@ -92,11 +135,33 @@ static void write_state(const char *state)
 		return;
 
 	fprintf(f, "state=%s\n", state);
-	fprintf(f, "last_error=%s\n", last_error);
-	fprintf(f, "updated=%ld\n", (long)time(NULL));
+	fprintf(f, "last_error=%s\n", err);
+	fprintf(f, "updated=%ld\n", now);
+	fprintf(f, "ubus=%s\n", ub);
 	fclose(f);
 
 	rename(tmp, state_file);
+}
+
+static void write_state(const char *state)
+{
+	pthread_mutex_lock(&st_lock);
+	snprintf(st_state, sizeof(st_state), "%s", state);
+	st_updated = (long)time(NULL);
+	pthread_mutex_unlock(&st_lock);
+
+	flush_state_file();
+}
+
+/* 记录控制面状态（registered / no-object / unavailable），并立刻反映到状态文件里，
+ * 这样 SSH 上一眼就能看出「页面读不到状态」到底是进程没跑还是 ubus 没连上 */
+static void set_ubus_state(const char *s)
+{
+	pthread_mutex_lock(&st_lock);
+	snprintf(st_ubus, sizeof(st_ubus), "%s", s);
+	pthread_mutex_unlock(&st_lock);
+
+	flush_state_file();
 }
 
 /* procd 之外也让 init 脚本/其它工具能找到 PID（SIGHUP 重连用） */
@@ -118,12 +183,13 @@ static void sleep_interruptible(int seconds)
 		seconds = sleep((unsigned int)seconds);
 }
 
-/* libcurl 进度回调：非 0 表示中断传输（手动重连时让正在飞的请求立刻收摊） */
+/* libcurl 进度回调：非 0 表示中断传输
+ * （手动重连 SIGHUP、或收到 SIGTERM 要退出时，都让正在飞的请求立刻收摊） */
 static int xferinfo_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
 		       curl_off_t ultotal, curl_off_t ulnow)
 {
 	(void)p, (void)dltotal, (void)dlnow, (void)ultotal, (void)ulnow;
-	return g_reconnect ? 1 : 0;
+	return (g_reconnect || g_stop) ? 1 : 0;
 }
 
 /* 深澜 ePortal 的 RSA 公钥（e=10001, n=94dd2a86...，pageInfo 实测） */
@@ -435,15 +501,171 @@ static int read_conf(const char *path, char *username, char *password)
 	return 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * 登录循环（worker 线程）—— 原来的主循环原样搬进来，认证/加密逻辑零改动
+ * ------------------------------------------------------------------------- */
+static void *login_worker(void *arg)
+{
+	(void)arg;
+
+	/*
+	 * 主线程为了把信号「留给 worker」而屏蔽了 SIGHUP/SIGTERM/SIGINT，
+	 * 而新线程会继承创建者的信号掩码 —— 所以这里必须显式解除屏蔽，
+	 * 否则所有信号都会一直处于 pending，进程既不能重连也停不下来。
+	 */
+	{
+		sigset_t set;
+
+		sigemptyset(&set);
+		sigaddset(&set, SIGHUP);
+		sigaddset(&set, SIGTERM);
+		sigaddset(&set, SIGINT);
+		pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+	}
+
+	while (!g_stop) {
+		int rc;
+
+		g_reconnect = 0; /* 消费掉上一次重连请求 */
+		rc = login(username, password);
+
+		if (g_stop)
+			break;
+
+		if (rc == 0) {
+			syslog(LOG_INFO, "login ok, awaiting");
+			pthread_mutex_lock(&st_lock);
+			last_error[0] = '\0';
+			pthread_mutex_unlock(&st_lock);
+			write_state("online");
+			sleep_interruptible(check_interval);
+		} else if (g_reconnect) {
+			/* 手动重连打断的，不是错误：立刻进入下一轮 */
+			syslog(LOG_INFO, "reconnect requested, restarting cycle");
+		} else {
+			syslog(LOG_ERR, "login failed, retry in 1s");
+			write_state("error");
+			sleep_interruptible(1);
+		}
+	}
+
+	write_state("stopped");
+	unlink(pid_file);
+
+	return NULL;
+}
+
+/* ---------------------------------------------------------------------------
+ * ubus 控制面：对象 hust-network-login，方法 status / reconnect
+ *
+ * 字段与返回结构与原来的 rpcd ucode 插件逐字一致，LuCI 页面因此不用改：
+ *   status    → { state, last_error, updated, running, pid }
+ *   reconnect → { result, action, pid[, error] }
+ * 特别注意 result 必须是**布尔**：视图里写的是 expect: { result: false }，
+ * 换成字符串会被前端 expect 逻辑替换成 false（按钮就会一直报失败）。
+ * ------------------------------------------------------------------------- */
+/*
+ * ubus 回复里的布尔值必须用 BLOBMSG_TYPE_BOOL（JSON 里是 true/false），
+ * 不能用 blobmsg_add_u8 —— 那是 INT8，序列化成 0/1 数字。LuCI 视图里写的是
+ * expect: { result: false }，前端 rpc.js 会把类型不符的值直接替换成 false，
+ * 于是「重连」按钮就会永远报失败。
+ */
+static void blobmsg_add_boolean(struct blob_buf *buf, const char *name, bool val)
+{
+	uint8_t v = val ? 1 : 0;
+
+	blobmsg_add_field(buf, BLOBMSG_TYPE_BOOL, name, &v, 1);
+}
+
+static int ubus_method_status(struct ubus_context *ctx, struct ubus_object *obj,
+			      struct ubus_request_data *req, const char *method,
+			      struct blob_attr *msg)
+{
+	struct blob_buf bb;
+	char state[sizeof(st_state)];
+	char err[sizeof(last_error)];
+	long updated;
+
+	(void)obj; (void)method; (void)msg;
+
+	pthread_mutex_lock(&st_lock);
+	snprintf(state, sizeof(state), "%s", st_state);
+	snprintf(err, sizeof(err), "%s", last_error);
+	updated = st_updated;
+	pthread_mutex_unlock(&st_lock);
+
+	memset(&bb, 0, sizeof(bb));
+	blob_buf_init(&bb, 0);
+
+	blobmsg_add_string(&bb, "state", state);
+	blobmsg_add_string(&bb, "last_error", err);
+	blobmsg_add_u64(&bb, "updated", (uint64_t)updated);
+	blobmsg_add_boolean(&bb, "running", true);
+	blobmsg_add_u32(&bb, "pid", (uint32_t)getpid());
+
+	ubus_send_reply(ctx, req, bb.head);
+	blob_buf_free(&bb);
+
+	return 0;
+}
+
+static int ubus_method_reconnect(struct ubus_context *ctx, struct ubus_object *obj,
+				 struct ubus_request_data *req, const char *method,
+				 struct blob_attr *msg)
+{
+	struct blob_buf bb;
+	int rc;
+
+	(void)obj; (void)method; (void)msg;
+
+	g_reconnect = 1;
+
+	/* 把 SIGHUP 直接投给 worker 线程：复用现成的打断链路
+	 * （xferinfo 回调中止 curl 传输 + sleep_interruptible 提前返回），
+	 * 因此是秒级生效，且不重启进程、不碰认证代码。 */
+	rc = pthread_kill(worker_tid, SIGHUP);
+
+	memset(&bb, 0, sizeof(bb));
+	blob_buf_init(&bb, 0);
+
+	blobmsg_add_boolean(&bb, "result", rc == 0);
+	blobmsg_add_string(&bb, "action", "signal");
+	blobmsg_add_u32(&bb, "pid", (uint32_t)getpid());
+
+	if (rc != 0)
+		blobmsg_add_string(&bb, "error", strerror(rc));
+
+	ubus_send_reply(ctx, req, bb.head);
+	blob_buf_free(&bb);
+
+	syslog(LOG_INFO, "reconnect requested via ubus (rc=%d)", rc);
+
+	return 0;
+}
+
+static const struct ubus_method ubus_methods[] = {
+	UBUS_METHOD_NOARG("status", ubus_method_status),
+	UBUS_METHOD_NOARG("reconnect", ubus_method_reconnect),
+};
+
+static struct ubus_object_type ubus_obj_type =
+	UBUS_OBJECT_TYPE("hust-network-login", ubus_methods);
+
+static struct ubus_object ubus_obj = {
+	.name = "hust-network-login",
+	.type = &ubus_obj_type,
+	.methods = ubus_methods,
+	.n_methods = ARRAY_SIZE(ubus_methods),
+};
+
 int main(int argc, char **argv)
 {
-	char username[128] = {0}, password[128] = {0};
-
 	openlog("hust-network-login", LOG_PID | LOG_NDELAY, LOG_DAEMON);
 
 	/* SIGTERM/SIGINT = 干净退出；SIGHUP = 中断当前请求并立刻重新认证（重连不重启进程） */
 	{
 		struct sigaction sa;
+		sigset_t set;
 
 		memset(&sa, 0, sizeof(sa));
 		sa.sa_handler = sig_handler;
@@ -453,6 +675,18 @@ int main(int argc, char **argv)
 		sigaction(SIGHUP, &sa, NULL);
 		sigaction(SIGTERM, &sa, NULL);
 		sigaction(SIGINT, &sa, NULL);
+
+		/*
+		 * 主线程屏蔽这三个信号，让它们只投递给 worker 线程：
+		 * ubus 的 reconnect 用 pthread_kill(worker, SIGHUP) 就能精准打断
+		 * worker 里阻塞中的 curl 传输；否则信号可能落在主线程，重连要等
+		 * 当前请求超时（最长 10 秒）才生效。
+		 */
+		sigemptyset(&set);
+		sigaddset(&set, SIGHUP);
+		sigaddset(&set, SIGTERM);
+		sigaddset(&set, SIGINT);
+		pthread_sigmask(SIG_BLOCK, &set, NULL);
 	}
 
 	{
@@ -498,34 +732,66 @@ int main(int argc, char **argv)
 	write_pidfile();
 	write_state("idle");
 
-	while (!g_stop) {
-		int rc;
-
-		g_reconnect = 0; /* 消费掉上一次重连请求 */
-		rc = login(username, password);
-
-		if (g_stop)
-			break;
-
-		if (rc == 0) {
-			syslog(LOG_INFO, "login ok, awaiting");
-			last_error[0] = '\0';
-			write_state("online");
-			sleep_interruptible(check_interval);
-		} else if (g_reconnect) {
-			/* 手动重连打断的，不是错误：立刻进入下一轮 */
-			syslog(LOG_INFO, "reconnect requested, restarting cycle");
-		} else {
-			syslog(LOG_ERR, "login failed, retry in 1s");
-			write_state("error");
-			sleep_interruptible(1);
-		}
+	/* 登录循环放进 worker 线程，主线程腾出来跑 ubus */
+	if (pthread_create(&worker_tid, NULL, login_worker, NULL) != 0) {
+		syslog(LOG_ERR, "cannot start worker thread");
+		write_state("stopped");
+		unlink(pid_file);
+		return 1;
 	}
 
-	write_state("stopped");
-	unlink(pid_file);
+	/*
+	 * 主线程：注册 ubus 对象并跑事件循环。
+	 * 连不上 ubusd 不影响登录（只是控制面不可用），所以失败只记日志。
+	 * socket 默认用 libubus 的编译期路径（/var/run/ubus/ubus.sock）；
+	 * HUST_NETWORK_LOGIN_UBUS_SOCKET 可覆盖，方便在开发机上做离线测试。
+	 */
+	{
+		const char *sock = getenv("HUST_NETWORK_LOGIN_UBUS_SOCKET");
+
+		ubus_ctx = ubus_connect((sock && sock[0]) ? sock : NULL);
+	}
+
+	if (ubus_ctx) {
+		char buf[24];
+		int rc;
+
+		ubus_add_uloop(ubus_ctx);
+
+		rc = ubus_add_object(ubus_ctx, &ubus_obj);
+
+		if (rc == 0) {
+			set_ubus_state("registered");
+			syslog(LOG_INFO, "ubus object hust-network-login registered");
+		}
+		else {
+			/* 把 ubusd 返回的错误码也写进状态文件，方便 SSH 上一眼看懂
+			 * （6=权限不足，通常是 ubusd 的 ACL 不允许该用户注册对象） */
+			snprintf(buf, sizeof(buf), "no-object(%d)", rc);
+			set_ubus_state(buf);
+			syslog(LOG_WARNING, "cannot register ubus object hust-network-login: %s",
+			       ubus_strerror(rc));
+		}
+	}
+	else {
+		set_ubus_state("unavailable");
+		syslog(LOG_WARNING, "cannot connect to ubusd, control plane disabled");
+	}
+
+	/* 500ms 粒度轮询而不是 uloop_run()：worker 退出后进程要能自己结束 */
+	while (ubus_ctx && !g_stop)
+		uloop_run_timeout(500);
+
+	pthread_join(worker_tid, NULL);
+
+	if (ubus_ctx) {
+		ubus_free(ubus_ctx);
+		uloop_done();
+	}
+
 	curl_global_cleanup();
 	syslog(LOG_INFO, "stopped");
 	closelog();
+
 	return 0;
 }

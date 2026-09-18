@@ -2,8 +2,8 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=hustNetworkLogin
 PKG_VERSION:=0.2.0
-PKG_RELEASE:=1
-PKG_BUILD_DEPENDS:=curl openssl
+PKG_RELEASE:=2
+PKG_BUILD_DEPENDS:=curl openssl libubox libubus
 
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=HUST campus network
@@ -17,12 +17,14 @@ define Package/hustNetworkLogin
   CATEGORY:=Network
   TITLE:=HUST campus network auto login (C)
   URL:=https://github.com/black-binary/hust-network-login
-  DEPENDS:=+libcurl +libopenssl
+  DEPENDS:=+libcurl +libopenssl +libubus +libubox
 endef
 
 define Package/hustNetworkLogin/description
   Automatic Srun ePortal login for the HUST campus network (C implementation),
-  reconnects automatically 15 seconds after the connection drops.
+  reconnects automatically 15 seconds after the connection drops. Exposes the
+  ubus object "hust-network-login" (status / reconnect) for the LuCI page and
+  for scripts - no rpcd plugin needed.
 endef
 
 define Build/Prepare
@@ -31,10 +33,10 @@ define Build/Prepare
 endef
 
 define Build/Compile
-	$(TARGET_CC) $(TARGET_CFLAGS) \
+	$(TARGET_CC) $(TARGET_CFLAGS) -pthread \
 		-I$(STAGING_DIR)/usr/include \
 		-o $(PKG_BUILD_DIR)/hust-network-login $(PKG_BUILD_DIR)/main.c \
-		$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/lib -lcurl -lcrypto
+		$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/lib -lcurl -lcrypto -lubus -lubox -pthread
 endef
 
 define Package/hustNetworkLogin/install
