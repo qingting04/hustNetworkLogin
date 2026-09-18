@@ -12,9 +12,6 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-msgid "Addresses used to check whether the connection is up. Multiple addresses are supported, separated by commas (tried in order); leave empty to use the built-in default."
-msgstr "用于检测是否在线的地址，支持逗号分隔多个（按顺序自动 fallback），留空使用内置默认值。"
-
 msgid "Authenticating"
 msgstr "认证中"
 
@@ -38,9 +35,6 @@ msgstr "已启用"
 
 msgid "HUST Network Login"
 msgstr "华中科技大学校园网登录"
-
-msgid "Interval between online checks, 15 seconds when left empty."
-msgstr "在线时的检测周期，留空默认 15 秒。"
 
 msgid "Last error"
 msgstr "最近错误"
@@ -66,9 +60,6 @@ msgstr "重连"
 msgid "Reconnect failed: %s"
 msgstr "重连失败：%s"
 
-msgid "Restarts the authentication immediately (the daemon is signalled, it is not restarted) - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
-msgstr "立即触发一次重新认证（靠信号通知守护进程，不重启进程）—— 网络环境变化、或被其它设备挤下线时很有用。刚改过配置请先「保存并应用」。"
-
 msgid "Running"
 msgstr "运行中"
 
@@ -77,9 +68,6 @@ msgstr "服务"
 
 msgid "Service status"
 msgstr "服务状态"
-
-msgid "Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it."
-msgstr "深澜 ePortal 认证（华中科技大学校园网）。开启后服务常驻运行，掉线自动重连；保存配置会自动重启服务。"
 
 msgid "Starting"
 msgstr "启动中"
@@ -92,9 +80,6 @@ msgstr "登录服务正在重新认证（触发方式：%s）。详情见「logr
 
 msgid "The service is disabled - enable it and apply the settings first."
 msgstr "服务未启用 —— 请先启用并保存配置。"
-
-msgid "The status is written by the login service itself and refreshed every few seconds."
-msgstr "状态由登录服务自己写入，页面每几秒自动刷新。"
 
 msgid "Unknown"
 msgstr "未知"

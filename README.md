@@ -103,7 +103,7 @@ make package/luci-app-hustNetworkLogin/compile V=s
 
 | 按钮 | 功能 |
 |------|------|
-| 重连 | 立刻重新认证：给守护进程发 `SIGHUP`，中断正在进行的请求并马上重跑一轮（**不重启进程**）；被其它设备挤下线、或换了网络环境时用 |
+| 重连 | 立刻重新认证：给守护进程发 `SIGHUP`，中断正在进行的请求并马上重跑一轮（**不重启进程**）；被其它设备挤下线、或换了网络环境时用。**改了配置请用「保存并应用」（会重启服务以套用新配置）** |
 
 > 服务未启用时点「重连」会提示先启用并保存配置。刚改过配置请先「保存并应用」，重连用的是已保存的配置。
 
@@ -113,7 +113,7 @@ make package/luci-app-hustNetworkLogin/compile V=s
 uci set hust-network-login.main.username='M2020123123'
 uci set hust-network-login.main.password='你的密码'
 uci set hust-network-login.main.enabled='1'
-uci commit hust-network-login && /etc/init.d/hust-network-login reload
+uci commit hust-network-login && /etc/init.d/hust-network-login reload   # 改配置后重启以生效
 logread | grep -i hust   # 看日志
 ```
 
@@ -177,6 +177,6 @@ fork 后按自己路由器改 workflow 顶部 4 个变量（`TARGET` / `SUBTARGE
 ## 说明
 
 - **状态与控制的实现**：C 守护进程把 `state` / `last_error` / `updated` 原子写入 `/tmp/run/hust-network-login.state`（tmpfs，重启清空）、PID 写入 `/tmp/run/hust-network-login.pid`；rpcd 的 ucode 插件把它包装成 ubus 对象 `hust-network-login`（`status` / `reconnect`），界面和脚本都调它。
-- **重连为什么是发信号而不是重启进程**：守护进程是「同步探测 + 登录」的简单循环，`SIGHUP` 会让它经 libcurl 的进度回调中断当前请求并立刻重跑一轮（秒级），比 `stop` + `start` 快，也不丢失进程内状态；`SIGTERM` / `SIGINT` 则写 `state=stopped`、删 pidfile 后干净退出（配合 procd）。详细过程仍看 syslog：`logread -e hust-network-login`。
+- **两条路径别混**：① 只想立刻重新认证（配置没变）→ 界面「重连」/ `ubus call hust-network-login reconnect`，守护进程收到 `SIGHUP`，经 libcurl 进度回调中断当前请求并马上重跑一轮（**不重启进程**）；② 改了配置（账号/密码/探测地址/检测周期）→ 「保存并应用」或 `uci commit ... && /etc/init.d/hust-network-login reload`，这条会**重启服务**，因为配置是启动时通过环境变量注入进程的。`SIGTERM`/`SIGINT` 会写 `state=stopped`、删 pidfile 后干净退出（配合 procd）。详细过程看 syslog：`logread -e hust-network-login`。
 - **包名/显示名是小驼峰 `hustNetworkLogin`**；但 UCI config 名、二进制名、init.d 脚本名保持 kebab-case `hust-network-login`（OpenWrt 系统机制约定）。
 - **LuCI 版本**：JS 框架需 LuCI 23.05+。

@@ -11,6 +11,8 @@
  *   status    → { state, last_error, updated, running, pid, enabled }
  *   reconnect → 让守护进程立刻重新认证（SIGHUP，不重启进程）
  * 字段命名与 jluNetworkLogin 的 ubus status 对齐。
+ *
+ * 页面布局：标题 → 服务状态（含「重连」按钮）→ 设置 → 底部保存/应用。
  */
 var callStatus = rpc.declare({
 	object: 'hust-network-login',
@@ -109,8 +111,7 @@ return view.extend({
 	render: function() {
 		var m, s, o;
 
-		m = new form.Map('hust-network-login', _('HUST Network Login'),
-			_('Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it.'));
+		m = new form.Map('hust-network-login', _('HUST Network Login'));
 
 		s = m.section(form.NamedSection, 'main', 'hust-network-login');
 		s.anonymous = true;
@@ -128,13 +129,11 @@ return view.extend({
 		o = s.option(form.Value, 'test_url', _('Probe URL'));
 		o.rmempty = true;
 		o.placeholder = _('comma separated, multiple allowed');
-		o.description = _('Addresses used to check whether the connection is up. Multiple addresses are supported, separated by commas (tried in order); leave empty to use the built-in default.');
 
 		o = s.option(form.Value, 'check_interval', _('Check interval (seconds)'));
 		o.rmempty = true;
 		o.datatype = 'uinteger';
 		o.placeholder = '15';
-		o.description = _('Interval between online checks, 15 seconds when left empty.');
 
 		return m.render().then(function(mapEl) {
 			var box = E('div', { 'class': 'cbi-section' }, [
@@ -150,18 +149,16 @@ return view.extend({
 						'class': 'cbi-button cbi-button-action',
 						'click': ui.createHandlerFn(this, 'handleReconnect')
 					}, [ _('Reconnect') ])
-				]),
-				E('p', { 'class': 'cbi-section-descr' }, [
-					_('Restarts the authentication immediately (the daemon is signalled, it is not restarted) - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them.'),
-					' ',
-					_('The status is written by the login service itself and refreshed every few seconds.')
 				])
 			]);
 
 			this.refresh_status();
 			poll.add(L.bind(this.refresh_status, this));
 
-			return E('div', {}, [ mapEl, box ]);
+			/* 状态区放在页面标题之后、设置表单之前 */
+			mapEl.insertBefore(box, mapEl.querySelector('.cbi-section'));
+
+			return mapEl;
 		}.bind(this));
 	}
 });

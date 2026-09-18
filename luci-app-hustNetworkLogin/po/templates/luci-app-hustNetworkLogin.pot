@@ -12,9 +12,6 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgid "Addresses used to check whether the connection is up. Multiple addresses are supported, separated by commas (tried in order); leave empty to use the built-in default."
-msgstr ""
-
 msgid "Authenticating"
 msgstr ""
 
@@ -37,9 +34,6 @@ msgid "Enabled"
 msgstr ""
 
 msgid "HUST Network Login"
-msgstr ""
-
-msgid "Interval between online checks, 15 seconds when left empty."
 msgstr ""
 
 msgid "Last error"
@@ -66,9 +60,6 @@ msgstr ""
 msgid "Reconnect failed: %s"
 msgstr ""
 
-msgid "Restarts the authentication immediately (the daemon is signalled, it is not restarted) - useful when the network changed or the account was kicked by another device. Apply the settings first if you just changed them."
-msgstr ""
-
 msgid "Running"
 msgstr ""
 
@@ -76,9 +67,6 @@ msgid "Service"
 msgstr ""
 
 msgid "Service status"
-msgstr ""
-
-msgid "Srun ePortal authentication for the HUST campus network. The service keeps running in the background and reconnects automatically when the connection drops; saving the configuration restarts it."
 msgstr ""
 
 msgid "Starting"
@@ -91,9 +79,6 @@ msgid "The login service is authenticating again now (requested by %s). Check \"
 msgstr ""
 
 msgid "The service is disabled - enable it and apply the settings first."
-msgstr ""
-
-msgid "The status is written by the login service itself and refreshed every few seconds."
 msgstr ""
 
 msgid "Unknown"
