@@ -131,4 +131,3 @@ fork 后按自己路由器改 workflow 顶部 4 个变量（`TARGET` / `SUBTARGE
 
 - **包名/显示名是小驼峰 `hustNetworkLogin`**；但 UCI config 名、二进制名、init.d 脚本名保持 kebab-case `hust-network-login`（OpenWrt 系统机制约定）。
 - **LuCI 版本**：JS 框架需 LuCI 23.05+。
-- **默认网关**：认证程序只负责「登录」，解决不了「WAN 口没有默认路由」——那是网络配置，与认证无关。

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <ctype.h>
 #include <curl/curl.h>
 #include <openssl/bn.h>
@@ -205,7 +206,7 @@ static int login(const char *username, const char *password)
 
 	resp = http_get(TEST_URL);
 	if (!resp) {
-		fprintf(stderr, "get %s failed\n", TEST_URL);
+		syslog(LOG_ERR, "get %s failed", TEST_URL);
 		return -1;
 	}
 
@@ -218,20 +219,20 @@ static int login(const char *username, const char *password)
 
 	if (extract(resp, "<script>top.self.location.href='http://",
 		    "/eportal/index.jsp", portal_ip, sizeof(portal_ip)) != 0) {
-		fprintf(stderr, "extract portal_ip failed\n");
+		syslog(LOG_ERR, "extract portal_ip failed");
 		free(resp);
 		return -1;
 	}
 
 	if (extract(resp, "mac=", "&t=", mac, sizeof(mac)) != 0) {
-		fprintf(stderr, "extract mac failed\n");
+		syslog(LOG_ERR, "extract mac failed");
 		free(resp);
 		return -1;
 	}
 
 	if (extract(resp, "/eportal/index.jsp?", "'</script>\r\n",
 		    query_string, sizeof(query_string)) != 0) {
-		fprintf(stderr, "extract query_string failed\n");
+		syslog(LOG_ERR, "extract query_string failed");
 		free(resp);
 		return -1;
 	}
@@ -248,7 +249,7 @@ static int login(const char *username, const char *password)
 
 	login_resp = http_post(login_url, body);
 	if (login_resp) {
-		fprintf(stderr, "login resp: %.200s\n", login_resp);
+		syslog(LOG_INFO, "login resp: %.200s", login_resp);
 		ok = strstr(login_resp, "success") ? 0 : -1;
 		free(login_resp);
 	}
@@ -278,9 +279,11 @@ int main(int argc, char **argv)
 {
 	char username[128] = {0}, password[128] = {0};
 
+	openlog("hust-network-login", LOG_PID | LOG_NDELAY, LOG_DAEMON);
+
 	if (argc >= 2) {
 		if (read_conf(argv[1], username, password) != 0) {
-			fprintf(stderr, "failed to read config file: %s\n", argv[1]);
+			syslog(LOG_ERR, "failed to read config file: %s", argv[1]);
 			return 1;
 		}
 	} else {
@@ -293,6 +296,7 @@ int main(int argc, char **argv)
 	}
 
 	if (!username[0] || !password[0]) {
+		syslog(LOG_ERR, "no username/password configured");
 		fprintf(stderr,
 			"no username/password. usage: %s [config_file]\n"
 			"  config file: line1=username, line2=password\n"
@@ -305,10 +309,10 @@ int main(int argc, char **argv)
 
 	for (;;) {
 		if (login(username, password) == 0) {
-			fprintf(stderr, "login ok. awaiting...\n");
+			syslog(LOG_INFO, "login ok, awaiting");
 			sleep(15);
 		} else {
-			fprintf(stderr, "error! retry in 1s\n");
+			syslog(LOG_ERR, "login failed, retry in 1s");
 			sleep(1);
 		}
 	}
