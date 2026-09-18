@@ -1,92 +1,134 @@
-# hustNetworkLogin — OpenWrt 插件 + LuCI 界面（C 版，源码编译）
+# hustNetworkLogin
 
-华中科技大学校园网（深澜 ePortal）自动登录的 OpenWrt 集成包。
+华中科技大学校园网（深澜 ePortal）自动登录 —— OpenWrt 插件 + LuCI 界面（C 版）。
 
-- 核心程序：**C 语言实现**（`src/main.c`），用 libcurl 做 HTTP、libcrypto 做 RSA，掉线 15 秒自动重连
-- 本包：OpenWrt 软件包 + procd 服务 + LuCI 网页配置（LuCI 23.05+ JS 框架）
-- 加密算法与上游 Rust 版逐字节一致（已对照其官方测试用例验证）
+掉线 15 秒自动重连，开箱即用，支持 GitHub Actions 云端编译（无需本地搭建 OpenWrt 环境）。
 
-## 为什么用 C 重写
+## 关于上游
 
-OpenWrt **原生就是 C 交叉编译工具链**（`$(TARGET_CC)` + musl），用 C 写意味着：
+本项目参考了 [@black-binary/hust-network-login](https://github.com/black-binary/hust-network-login)（Rust 版）的认证流程与密码加密算法，感谢原作者。
 
-- `make menuconfig` 选好架构 → `make` 就是**真正的源码交叉编译**，全程不下载任何预编译二进制
-- 依赖只有 `libcurl` + `libopenssl`（OpenWrt 现成软件包）
+> 为什么用 C 重写：OpenWrt 原生就是 C 交叉编译工具链（`$(TARGET_CC)` + musl），用 C 可以做到「menuconfig 选架构 → make 直接交叉编译」，不依赖任何预编译二进制；而 Rust 交叉编译在 OpenWrt 里需要额外工具链，通常只能按架构下载预编译产物。
 
-## 目录结构
+密码加密算法（`BE(密码 ">" mac) ^ 65537 mod n`）已对照上游官方测试用例**逐字节验证一致**。
+
+## 特性
+
+- 纯 C 实现（`libcurl` + `libopenssl`），OpenWrt 原生交叉编译
+- 掉线 15 秒检测并自动重连
+- LuCI 网页配置（JS 框架，需 LuCI 23.05+，ImmortalWrt 23.05/25.x 均支持）
+- GitHub Actions 云端编译，本地零环境
+
+## 快速开始：fork 编译（推荐，无需本地环境）
+
+### 1. Fork 本仓库
+
+点右上角 **Fork**。
+
+### 2. 改成你自己的路由器架构
+
+打开 `.github/workflows/build.yml`，顶部四个变量默认是**小米路由器 3G（MT7621）**：
+
+```yaml
+env:
+  SDK_VERSION: "25.12.2"   # ImmortalWrt 版本
+  TARGET: "ramips"         # 目标平台
+  SUBTARGET: "mt7621"      # 子目标
+  GCC: "14.3.0"            # gcc 版本
+```
+
+如果路由器不是 MT7621，改成对应的值（常见映射见文末[架构表](#架构映射)）。
+
+### 3. 触发编译
+
+- 直接 push 到 `main` 分支，自动触发；或
+- 仓库 **Actions** 标签页 → 左侧 `build` → **Run workflow** 手动触发。
+
+约 5~10 分钟完成。
+
+### 4. 下载产物
+
+Actions → 最近一次运行 → **Summary** → 下载 `hustNetworkLogin` artifact，解压得到两个 `.apk`：
 
 ```
-.
-├── package/hustNetworkLogin/           # C 软件包
-│   ├── Makefile                          #   标准 C 包，$(TARGET_CC) 交叉编译
-│   ├── src/main.c                        #   C 源码（登录 + RSA + 检测）
-│   └── files/
-│       ├── etc/init.d/hust-network-login #   procd 服务脚本
-│       └── etc/config/hust-network-login #   UCI 默认配置
-└── luci-app-hustNetworkLogin/          # LuCI 插件（JS 版）
-    ├── Makefile
-    ├── htdocs/luci-static/resources/view/
-    │   └── hustNetworkLogin.js         #   JS 视图模块（view.extend + form.Map）
-    └── root/usr/share/luci/menu.d/
-        └── luci-app-hustNetworkLogin.json  # 菜单「服务 → 校园网登录」
+hustNetworkLogin_0.2.0-1_mipsel_24kc.apk
+luci-app-hustNetworkLogin_1.0.0-1_all.apk
 ```
 
-## 编译（放进 immortalwrt 源码树）
+### 5. 装到路由器
 
 ```sh
-# 1. 放进源码树
+scp hustNetworkLogin_*.apk luci-app-hustNetworkLogin_*.apk root@192.168.1.1:/tmp/
+ssh root@192.168.1.1
+apk add --allow-untrusted /tmp/hustNetworkLogin_*.apk
+apk add --allow-untrusted /tmp/luci-app-hustNetworkLogin_*.apk
+```
+
+> `--allow-untrusted` 是因为本地/CI 编译的包没有官方签名。
+
+## 本地编译（有 OpenWrt / ImmortalWrt 源码树时）
+
+```sh
 cp -r package/hustNetworkLogin      immortalwrt/package/
 cp -r luci-app-hustNetworkLogin     immortalwrt/package/
 cd immortalwrt
 
-# 2. 更新安装 feeds（首次需要，为 luci.mk 和 libcurl/libopenssl 依赖）
-./scripts/feeds update -a
-./scripts/feeds install -a
+./scripts/feeds update -a && ./scripts/feeds install -a   # 首次，拉 feeds 源码
 
-# 3. 选目标架构（小米3G = Target System: MediaTek Ralink MIPS → MT7621）
-make menuconfig
-#    Network → hustNetworkLogin
-#    LuCI → Applications → luci-app-hustNetworkLogin
-
-# 4. 编译（原生交叉编译，自动出对应架构 ipk）
+make menuconfig   # 选架构 + 勾选 Network → hustNetworkLogin，LuCI → Applications → luci-app-hustNetworkLogin
 make package/hustNetworkLogin/compile V=s
 make package/luci-app-hustNetworkLogin/compile V=s
 ```
 
-生成的 ipk 在 `bin/packages/*/base/` 下，传到路由器 `opkg install` 即可。
-
 ## 使用
 
-LuCI →「服务 → 校园网登录」：填学号、密码，勾选「启用自动登录」，保存。
+打开 LuCI（`http://192.168.1.1`）→ **服务 → hustNetworkLogin**，填学号、密码，勾选「启用自动登录」，保存。
 
 命令行等价：
 
 ```sh
 uci set hust-network-login.main.username='M202674581'
-uci set hust-network-login.main.password='密码'
+uci set hust-network-login.main.password='你的密码'
 uci set hust-network-login.main.enabled='1'
 uci commit hust-network-login && /etc/init.d/hust-network-login reload
-logread | grep -i hust
+logread | grep -i hust   # 看日志
 ```
 
-## 手动安装（备选，不编译 ipk）
+## 目录结构
 
-若只想快速装到现有 ImmortalWrt，先编译/拿到 `hust-network-login` 二进制，再用 `install.sh`：
-
-```sh
-scp hust-network-login root@192.168.1.1:/tmp/
-scp install.sh root@192.168.1.1:/tmp/
-ssh root@192.168.1.1 "sh /tmp/install.sh /tmp/hust-network-login"
+```
+.
+├── package/hustNetworkLogin/          # C 软件包
+│   ├── Makefile                       #   标准 C 包，$(TARGET_CC) 交叉编译
+│   ├── src/main.c                     #   C 源码（登录 + RSA + 检测）
+│   ├── test/test_encrypt.c            #   加密自测（对照上游用例）
+│   └── files/
+│       ├── etc/init.d/hust-network-login   # procd 服务脚本
+│       └── etc/config/hust-network-login   # UCI 默认配置
+├── luci-app-hustNetworkLogin/         # LuCI 插件（JS 版）
+│   ├── Makefile
+│   ├── htdocs/luci-static/resources/view/hustNetworkLogin.js
+│   └── root/usr/share/luci/menu.d/luci-app-hustNetworkLogin.json
+└── .github/workflows/build.yml        # GitHub Actions 云端编译
 ```
 
-## 配置方式
+## 架构映射
 
-程序支持两种配置来源（优先级从高到低）：
+fork 后按自己路由器改 workflow 顶部 4 个变量（`TARGET` / `SUBTARGET` 尤其重要）：
 
-1. 命令行配置文件（两行：用户名、密码）：`hust-network-login /etc/xxx.conf`
-2. 环境变量：`HUST_NETWORK_LOGIN_USERNAME` / `HUST_NETWORK_LOGIN_PASSWORD`（procd 脚本用这种）
+| 路由器 | TARGET / SUBTARGET |
+|---|---|
+| 小米 3G / 4A 千兆 / AC2100 等（MT7621） | `ramips` / `mt7621` |
+| 小米 4A 百兆 / 4C 等（MT7628） | `ramips` / `mt76x8` |
+| 红米 AC2100（MT7621） | `ramips` / `mt7621` |
+| x86_64 软路由 | `x86` / `64` |
+| 树莓派 4 | `bcm27xx` / `bcm2711` |
+| 斐讯 N1 | `rockchip` / `armv8`（或对应） |
+
+> 不确定时：在 [ImmortalWrt 固件下载站](https://downloads.immortalwrt.org) 找到你的机型，看它在 `releases/<版本>/targets/<TARGET>/<SUBTARGET>/` 的哪一层，把这两段填进去即可。`GCC` 版本看该目录下 `immortalwrt-sdk-*.tar.zst` 文件名里的 `gcc-xx.x.x`。
 
 ## 说明
 
-- **LuCI 版本**：JS 框架需 LuCI 23.05+（ImmortalWrt 23.05/25.x 均支持）。
+- **包名/显示名是小驼峰 `hustNetworkLogin`**；但 UCI config 名、二进制名、init.d 脚本名保持 kebab-case `hust-network-login`（OpenWrt 系统机制约定）。
+- **LuCI 版本**：JS 框架需 LuCI 23.05+。
 - **默认网关**：认证程序只负责「登录」，解决不了「WAN 口没有默认路由」——那是网络配置，与认证无关。
