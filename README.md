@@ -1,4 +1,4 @@
-# hust-network-login — OpenWrt 插件 + LuCI 界面（C 版，源码编译）
+# hustNetworkLogin — OpenWrt 插件 + LuCI 界面（C 版，源码编译）
 
 华中科技大学校园网（深澜 ePortal）自动登录的 OpenWrt 集成包。
 
@@ -17,26 +17,26 @@ OpenWrt **原生就是 C 交叉编译工具链**（`$(TARGET_CC)` + musl），�
 
 ```
 .
-├── package/hust-network-login/           # C 软件包
+├── package/hustNetworkLogin/           # C 软件包
 │   ├── Makefile                          #   标准 C 包，$(TARGET_CC) 交叉编译
 │   ├── src/main.c                        #   C 源码（登录 + RSA + 检测）
 │   └── files/
 │       ├── etc/init.d/hust-network-login #   procd 服务脚本
 │       └── etc/config/hust-network-login #   UCI 默认配置
-└── luci-app-hust-network-login/          # LuCI 插件（JS 版）
+└── luci-app-hustNetworkLogin/          # LuCI 插件（JS 版）
     ├── Makefile
     ├── htdocs/luci-static/resources/view/
-    │   └── hust-network-login.js         #   JS 视图模块（view.extend + form.Map）
+    │   └── hustNetworkLogin.js         #   JS 视图模块（view.extend + form.Map）
     └── root/usr/share/luci/menu.d/
-        └── luci-app-hust-network-login.json  # 菜单「服务 → 校园网登录」
+        └── luci-app-hustNetworkLogin.json  # 菜单「服务 → 校园网登录」
 ```
 
 ## 编译（放进 immortalwrt 源码树）
 
 ```sh
 # 1. 放进源码树
-cp -r package/hust-network-login      immortalwrt/package/
-cp -r luci-app-hust-network-login     immortalwrt/package/
+cp -r package/hustNetworkLogin      immortalwrt/package/
+cp -r luci-app-hustNetworkLogin     immortalwrt/package/
 cd immortalwrt
 
 # 2. 更新安装 feeds（首次需要，为 luci.mk 和 libcurl/libopenssl 依赖）
@@ -45,12 +45,12 @@ cd immortalwrt
 
 # 3. 选目标架构（小米3G = Target System: MediaTek Ralink MIPS → MT7621）
 make menuconfig
-#    Network → hust-network-login
-#    LuCI → Applications → luci-app-hust-network-login
+#    Network → hustNetworkLogin
+#    LuCI → Applications → luci-app-hustNetworkLogin
 
 # 4. 编译（原生交叉编译，自动出对应架构 ipk）
-make package/hust-network-login/compile V=s
-make package/luci-app-hust-network-login/compile V=s
+make package/hustNetworkLogin/compile V=s
+make package/luci-app-hustNetworkLogin/compile V=s
 ```
 
 生成的 ipk 在 `bin/packages/*/base/` 下，传到路由器 `opkg install` 即可。

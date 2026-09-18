@@ -29,8 +29,8 @@ jobs:
 
       - name: Copy packages into SDK
         run: |
-          cp -r package/hust-network-login immortalwrt-sdk-*/package/
-          cp -r luci-app-hust-network-login immortalwrt-sdk-*/package/
+          cp -r package/hustNetworkLogin immortalwrt-sdk-*/package/
+          cp -r luci-app-hustNetworkLogin immortalwrt-sdk-*/package/
 
       - name: Build
         run: |
@@ -38,13 +38,13 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a -f
           make defconfig
-          make package/hust-network-login/compile V=s -j$(nproc)
-          make package/luci-app-hust-network-login/compile V=s -j$(nproc)
+          make package/hustNetworkLogin/compile V=s -j$(nproc)
+          make package/luci-app-hustNetworkLogin/compile V=s -j$(nproc)
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hust-network-login
+          name: hustNetworkLogin
           path: |
-            immortalwrt-sdk-*/bin/packages/**/hust-network-login*.apk
-            immortalwrt-sdk-*/bin/packages/**/luci-app-hust-network-login*.apk
+            immortalwrt-sdk-*/bin/packages/**/hustNetworkLogin*.apk
+            immortalwrt-sdk-*/bin/packages/**/luci-app-hustNetworkLogin*.apk

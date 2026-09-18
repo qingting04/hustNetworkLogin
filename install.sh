@@ -78,14 +78,14 @@ fi
 
 echo "==> 写 LuCI 菜单（JS 版）"
 mkdir -p /usr/share/luci/menu.d
-cat > /usr/share/luci/menu.d/luci-app-hust-network-login.json <<'EOF'
+cat > /usr/share/luci/menu.d/luci-app-hustNetworkLogin.json <<'EOF'
 {
-	"admin/services/hust-network-login": {
+	"admin/services/hustNetworkLogin": {
 		"title": "校园网登录",
 		"order": 90,
 		"action": {
 			"type": "view",
-			"path": "hust-network-login"
+			"path": "hustNetworkLogin"
 		}
 	}
 }
@@ -93,7 +93,7 @@ EOF
 
 echo "==> 写 LuCI 视图（JS 版）"
 mkdir -p /www/luci-static/resources/view
-cat > /www/luci-static/resources/view/hust-network-login.js <<'EOF'
+cat > /www/luci-static/resources/view/hustNetworkLogin.js <<'EOF'
 'use strict';
 'require form';
 'require uci';
@@ -107,7 +107,7 @@ return view.extend({
 	render: function() {
 		var m, s, o;
 
-		m = new form.Map('hust-network-login', _('校园网自动登录'),
+		m = new form.Map('hust-network-login', _('hustNetworkLogin'),
 			_('深澜 ePortal 认证（华中科技大学校园网）。开启后服务常驻运行，掉线后 15 秒自动重连；保存配置会自动重启服务。'));
 
 		s = m.section(form.NamedSection, 'main', 'hust-network-login');
