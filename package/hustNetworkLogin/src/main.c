@@ -6,12 +6,13 @@
  * 配置：环境变量 HUST_NETWORK_LOGIN_USERNAME / HUST_NETWORK_LOGIN_PASSWORD，
  *       或命令行传配置文件路径（两行：第一行用户名，第二行密码）。
  *
- * 状态上报：把 state / last_error / updated 写入 /tmp/run/hust-network-login.state
- *           （SSH 里 cat 就能看），PID 另写 /tmp/run/hust-network-login.pid。
+ * 状态上报：把 state / last_error / updated / ubus 写入 /tmp/run/hust-network-login.state
+ *           （SSH 里 cat 就能看；ubus= 是控制面自检结果），PID 另写 .pid 文件。
  * 控制面：进程自己注册 ubus 对象 hust-network-login（uloop + libubus），
  *       页面与脚本直接 `ubus call hust-network-login status|reconnect`，
  *       不再依赖 rpcd 的 ucode 插件（插件加载失败会让页面彻底失能）。
- *       登录循环跑在单独的 worker 线程，主线程只跑 uloop 事件循环。
+ *       登录循环跑在单独的 worker 线程，主线程只跑 uloop 事件循环；
+ *       连不上 ubusd / ubusd 重启导致对象消失时，每 5 秒重连并重新发布（自愈）。
  * 控制：SIGHUP = 中断当前 HTTP 传输并立刻重新认证（重连，不重启进程）；
  *       SIGTERM/SIGINT = 干净退出（写 state=stopped、删 pidfile、注销 ubus 对象）。
  */
@@ -153,15 +154,24 @@ static void write_state(const char *state)
 	flush_state_file();
 }
 
-/* 记录控制面状态（registered / no-object / unavailable），并立刻反映到状态文件里，
- * 这样 SSH 上一眼就能看出「页面读不到状态」到底是进程没跑还是 ubus 没连上 */
-static void set_ubus_state(const char *s)
+/* 记录控制面状态（registered / no-object(N) / reconnecting / unavailable），并立刻
+ * 反映到状态文件里，这样 SSH 上一眼就能看出「页面读不到状态」到底是进程没跑、
+ * ubus 没连上、还是注册被 ubusd 拒了。状态没变就不重写文件，也不重复刷日志。
+ * 返回是否发生了变化。 */
+static int set_ubus_state(const char *s)
 {
+	int changed;
+
 	pthread_mutex_lock(&st_lock);
-	snprintf(st_ubus, sizeof(st_ubus), "%s", s);
+	changed = strcmp(st_ubus, s) != 0;
+	if (changed)
+		snprintf(st_ubus, sizeof(st_ubus), "%s", s);
 	pthread_mutex_unlock(&st_lock);
 
-	flush_state_file();
+	if (changed)
+		flush_state_file();
+
+	return changed;
 }
 
 /* procd 之外也让 init 脚本/其它工具能找到 PID（SIGHUP 重连用） */
@@ -658,6 +668,103 @@ static struct ubus_object ubus_obj = {
 	.n_methods = ARRAY_SIZE(ubus_methods),
 };
 
+/* ---------------------------------------------------------------------------
+ * 控制面韧性：连接/注册失败不是终态
+ *
+ * 页面报 -32000「Object not found」（uhttpd 的 ubus 插件在 ubus_lookup_id()
+ * 失败时抛的，在 ACL 校验之前）只可能是两种处境：进程根本没在跑（页面显示
+ * 「服务未运行」），或者进程在跑但对象不在总线上 —— 后者必须在这里自愈：
+ *   1. 启动时 ubusd 还没就绪（或刚好在重启）；
+ *   2. ubusd 中途重启：连接断开、对象从总线消失。libubus 默认的
+ *      connection_lost 只是 uloop_end()，进程还活着、对象却再也不回来了，
+ *      于是页面从此一直报「Object not found」。
+ * 所以统一走「定时重试」：连不上/注册失败每 UBUS_RETRY_MS 重试一次；断线后
+ * 重连并重新发布对象（ubusd 换了实例，旧的 object/type id 已失效，必须清 0
+ * 让它重新 push 类型）。
+ * ------------------------------------------------------------------------- */
+#define UBUS_RETRY_MS 5000
+
+/* NULL = 用 libubus 编译期默认路径（/var/run/ubus/ubus.sock） */
+static const char *ubus_socket_path;
+
+static void ubus_attach(void);
+static void ubus_retry_cb(struct uloop_timeout *tmo);
+
+static struct uloop_timeout ubus_retry_tmo = { .cb = ubus_retry_cb };
+
+static void ubus_retry_cb(struct uloop_timeout *tmo)
+{
+	(void)tmo;
+	ubus_attach();
+}
+
+/* 连接断了（ubusd 重启/被杀）：不调 uloop_end()（那只是停掉事件循环），
+ * 而是安排重连 + 重新注册 */
+static void ubus_connection_lost(struct ubus_context *ctx)
+{
+	(void)ctx;
+
+	if (set_ubus_state("reconnecting"))
+		syslog(LOG_WARNING, "lost connection to ubusd, reconnecting in %d s",
+		       UBUS_RETRY_MS / 1000);
+
+	uloop_timeout_set(&ubus_retry_tmo, UBUS_RETRY_MS);
+}
+
+/* 连接 ubusd + 注册对象；任何一步失败都排一次重试，函数本身可反复调用 */
+static void ubus_attach(void)
+{
+	int rc;
+
+	/*
+	 * 旧连接已经不可用（ubusd 重启/被杀）时，直接把 context 丢掉重建一个，
+	 * 不走 ubus_reconnect()：它只负责把 socket 接回来，接回来之后 libubus 会在
+	 * ubus_refresh_state() 里自己重新发布对象，我们再 add 一次就撞名了
+	 * （实测：对象在总线上，但 add 返回 Invalid argument、调用方超时）；
+	 * 而且它的结果我们也拿不到。重建之后注册路径只剩一条，可验证。
+	 */
+	if (ubus_ctx) {
+		ubus_free(ubus_ctx);
+		ubus_ctx = NULL;
+	}
+
+	/* ubusd 上的 object/type id 已经作废，清 0 让它重新发布 */
+	ubus_obj.id = 0;
+	ubus_obj_type.id = 0;
+
+	ubus_ctx = ubus_connect(ubus_socket_path);
+	if (!ubus_ctx) {
+		if (set_ubus_state("unavailable"))
+			syslog(LOG_WARNING, "cannot connect to ubusd, retrying in %d s",
+			       UBUS_RETRY_MS / 1000);
+
+		uloop_timeout_set(&ubus_retry_tmo, UBUS_RETRY_MS);
+		return;
+	}
+
+	/* 覆盖 libubus 默认的 connection_lost（它只会 uloop_end()） */
+	ubus_ctx->connection_lost = ubus_connection_lost;
+	ubus_add_uloop(ubus_ctx);
+
+	rc = ubus_add_object(ubus_ctx, &ubus_obj);
+	if (rc == 0) {
+		set_ubus_state("registered");
+		syslog(LOG_INFO, "ubus object hust-network-login registered");
+	}
+	else {
+		/* 把 ubusd 返回的错误码也写进状态文件，方便 SSH 上一眼看懂
+		 * （6=权限不足，通常是 ubusd 的 ACL 不允许该用户注册对象） */
+		char buf[24];
+
+		snprintf(buf, sizeof(buf), "no-object(%d)", rc);
+		if (set_ubus_state(buf))
+			syslog(LOG_WARNING, "cannot register ubus object hust-network-login: %s",
+			       ubus_strerror(rc));
+
+		uloop_timeout_set(&ubus_retry_tmo, UBUS_RETRY_MS);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	openlog("hust-network-login", LOG_PID | LOG_NDELAY, LOG_DAEMON);
@@ -741,45 +848,23 @@ int main(int argc, char **argv)
 	}
 
 	/*
-	 * 主线程：注册 ubus 对象并跑事件循环。
-	 * 连不上 ubusd 不影响登录（只是控制面不可用），所以失败只记日志。
+	 * 主线程：连接 ubusd、发布对象，然后跑事件循环。
+	 * 连不上 ubusd 不影响登录（只是控制面不可用），ubus_attach() 会自己定时重试，
+	 * 所以这里不需要区分成功/失败。
 	 * socket 默认用 libubus 的编译期路径（/var/run/ubus/ubus.sock）；
 	 * HUST_NETWORK_LOGIN_UBUS_SOCKET 可覆盖，方便在开发机上做离线测试。
 	 */
 	{
 		const char *sock = getenv("HUST_NETWORK_LOGIN_UBUS_SOCKET");
 
-		ubus_ctx = ubus_connect((sock && sock[0]) ? sock : NULL);
+		ubus_socket_path = (sock && sock[0]) ? sock : NULL;
 	}
 
-	if (ubus_ctx) {
-		char buf[24];
-		int rc;
+	ubus_attach();
 
-		ubus_add_uloop(ubus_ctx);
-
-		rc = ubus_add_object(ubus_ctx, &ubus_obj);
-
-		if (rc == 0) {
-			set_ubus_state("registered");
-			syslog(LOG_INFO, "ubus object hust-network-login registered");
-		}
-		else {
-			/* 把 ubusd 返回的错误码也写进状态文件，方便 SSH 上一眼看懂
-			 * （6=权限不足，通常是 ubusd 的 ACL 不允许该用户注册对象） */
-			snprintf(buf, sizeof(buf), "no-object(%d)", rc);
-			set_ubus_state(buf);
-			syslog(LOG_WARNING, "cannot register ubus object hust-network-login: %s",
-			       ubus_strerror(rc));
-		}
-	}
-	else {
-		set_ubus_state("unavailable");
-		syslog(LOG_WARNING, "cannot connect to ubusd, control plane disabled");
-	}
-
-	/* 500ms 粒度轮询而不是 uloop_run()：worker 退出后进程要能自己结束 */
-	while (ubus_ctx && !g_stop)
+	/* 500ms 粒度轮询而不是 uloop_run()：这样 ubus 重连定时器能跑到，
+	 * 而且 worker 退出/收到信号后进程能自己结束 */
+	while (!g_stop)
 		uloop_run_timeout(500);
 
 	pthread_join(worker_tid, NULL);

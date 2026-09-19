@@ -40,6 +40,22 @@ function state_label(state) {
 	return _('Unknown');
 }
 
+/*
+ * ubus 总线上没有 hust-network-login 这个对象时，uhttpd 的 ubus 插件会直接回
+ * -32000「Object not found」（这一步在 ACL 校验之前），含义只有一个：守护进程
+ * 没在跑 —— 没启动、装了新版本没重启（OpenWrt 升级包不会自动重启服务）、或者
+ * 二进制还是旧版（旧版不注册 ubus 对象）。把这句话翻译成人能直接照做的话，
+ * 别让用户只看到一句 RPC 报错。
+ */
+function rpc_message(e) {
+	var msg = String(e);
+
+	if (msg.indexOf('Object not found') > -1)
+		return _('the login service is not running (no ubus object) - start it with "/etc/init.d/hust-network-login restart"');
+
+	return msg;
+}
+
 function row(label, node) {
 	return E('div', { 'class': 'tr' }, [
 		E('div', { 'class': 'td left' }, [ label ]),
@@ -82,20 +98,35 @@ return view.extend({
 			}
 		}).catch(function(e) {
 			ui.addNotification(_('Reconnect'),
-				E('p', [ _('Reconnect failed: %s').format(String(e)) ]), 'warning');
+				E('p', [ _('Reconnect failed: %s').format(rpc_message(e)) ]), 'warning');
 		}).then(function() {
 			btn.disabled = false;
 			return this.refresh_status();
 		}.bind(this));
 	},
 
+	/* 守护进程没在跑（ubus 对象不存在）时禁用「重连」按钮：
+	 * 此时点它只会拿到一句 RPC 报错，按钮状态本身就把问题说清楚了。 */
+	set_available: function(up) {
+		var btn = document.getElementById('hust-reconnect');
+
+		if (btn)
+			btn.disabled = !up;
+	},
+
 	refresh_status: function() {
-		/* 只显示连接状态与最近错误：守护进程不在运行时 ubus 会返回 state=stopped，
-		 * 所以不需要单独一行「服务状态」。 */
-		return callStatus().catch(function() { return null; }).then(function(st) {
-			set_text('hust-status-state', st ? state_label(st.state) : _('Unknown'));
-			set_text('hust-status-error', (st && st.last_error) || '-');
-		});
+		/* 只显示连接状态与最近错误：守护进程不在运行时 ubus 会回 -32000
+		 * Object not found，这里翻译成「服务未运行」+ 排查提示，
+		 * 而不是留一句「未知」。 */
+		return callStatus().then(function(st) {
+			set_text('hust-status-state', state_label(st.state));
+			set_text('hust-status-error', st.last_error || '-');
+			this.set_available(true);
+		}.bind(this)).catch(function(e) {
+			set_text('hust-status-state', _('Service not running'));
+			set_text('hust-status-error', rpc_message(e));
+			this.set_available(false);
+		}.bind(this));
 	},
 
 	render: function() {
@@ -133,20 +164,24 @@ return view.extend({
 		o.placeholder = '15';
 
 		return m.render().then(function(mapEl) {
+			var btn = E('button', {
+				'id': 'hust-reconnect',
+				'class': 'cbi-button cbi-button-action',
+				'click': ui.createHandlerFn(this, 'handleReconnect')
+			}, [ _('Reconnect') ]);
+
 			var box = E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, [ _('Service status') ]),
 				E('div', { 'class': 'table' }, [
 					row(_('Connection state'), E('span', { 'id': 'hust-status-state' }, [ '-' ])),
 					row(_('Last error'), E('span', { 'id': 'hust-status-error' }, [ '-' ]))
 				]),
-				E('div', { 'class': 'cbi-page-actions' }, [
-					E('button', {
-						'class': 'cbi-button cbi-button-action',
-						'click': ui.createHandlerFn(this, 'handleReconnect')
-					}, [ _('Reconnect') ])
-				])
+				E('div', { 'class': 'cbi-page-actions' }, [ btn ])
 			]);
 
+			/* 先问一次状态再放开按钮：守护进程没在跑时按钮保持禁用，
+			 * 用户看到的是「服务未运行 + 怎么启动」，而不是一串 RPC 报错 */
+			btn.disabled = true;
 			this.refresh_status();
 			poll.add(L.bind(this.refresh_status, this));
 

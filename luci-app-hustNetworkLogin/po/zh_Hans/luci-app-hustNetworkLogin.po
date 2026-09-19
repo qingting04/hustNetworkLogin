@@ -51,6 +51,9 @@ msgstr "重连"
 msgid "Reconnect failed: %s"
 msgstr "重连失败：%s"
 
+msgid "Service not running"
+msgstr "服务未运行"
+
 msgid "Service status"
 msgstr "服务状态"
 
@@ -74,6 +77,9 @@ msgstr "用户名"
 
 msgid "comma separated, multiple allowed"
 msgstr "多个地址用逗号分隔"
+
+msgid "the login service is not running (no ubus object) - start it with \"/etc/init.d/hust-network-login restart\""
+msgstr "登录服务没有运行（ubus 里没有这个对象）—— 用 “/etc/init.d/hust-network-login restart” 启动它"
 
 msgid "unknown error"
 msgstr "未知错误"

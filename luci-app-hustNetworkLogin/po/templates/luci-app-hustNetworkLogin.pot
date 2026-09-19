@@ -51,6 +51,9 @@ msgstr ""
 msgid "Reconnect failed: %s"
 msgstr ""
 
+msgid "Service not running"
+msgstr ""
+
 msgid "Service status"
 msgstr ""
 
@@ -73,6 +76,9 @@ msgid "Username"
 msgstr ""
 
 msgid "comma separated, multiple allowed"
+msgstr ""
+
+msgid "the login service is not running (no ubus object) - start it with \"/etc/init.d/hust-network-login restart\""
 msgstr ""
 
 msgid "unknown error"
