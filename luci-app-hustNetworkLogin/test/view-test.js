@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 /*
  * 视图逻辑回归测试：用 node 桩掉 LuCI 的模块环境（form/poll/rpc/uci/ui/view/L/E/_/document），
- * 但 **rpc.declare 的 expect 处理逐字照搬 luci-static/resources/rpc.js** —— 视图读到的
- * 到底是不是「回复对象」，取决于这一小段代码，桩不忠实就测不出这类 bug。
+ * 但两处必须**忠实照搬真实行为**，否则这类 bug 测不出来：
+ *
+ *   1. rpc.declare 的 expect 处理（照搬 luci-static/resources/rpc.js）——
+ *      视图拿到的到底是「回复对象」还是被拆开的某个字段，全由那一小段决定。
+ *   2. Map.save()/reset() 结尾必定调 Map.renderContents()，它把 map 元素内部
+ *      清空后重画（照搬 luci-base form.js:669-711 的 dom.content(mapEl, null)）——
+ *      插在 map 元素内部的节点会被冲掉。测试用例 10 就守着这条。
  *
  * 用法: node luci-app-hustNetworkLogin/test/view-test.js [视图路径]
  *
@@ -13,10 +18,11 @@
  *   4. 缺项优先于守护进程上报的历史错误
  *   5. 缺项但服务仍在线（改了配置还没保存）→ 状态照实显示，错误行仍提醒缺项
  *   6. 缺项时点「重连」→ 只提示缺什么，不发起 RPC
- *   7. 点「重连」成功 → 解析守护进程回复 {result:true, action:"signal", pid:N} 并给 info 提示
- *      （回归点：expect 写错时这里会变成 "unknown error"）
+ *   7. 点「重连」成功 → 弹 info 提示并解析出 action（回归点：expect 写错会变成 unknown error）
  *   8. 守护进程回 result:false + error → 把它的原话显示出来
  *   9. 配置齐全但服务没跑 → 提示 restart，不误报缺项
+ *  10. 保存/重置导致 map 内部 DOM 重建后 → 状态区与按钮仍在页面上，且能继续刷新
+ *      （回归点：状态区若插在 map 内部，会被 Map.renderContents() 一起清掉）
  */
 'use strict';
 
@@ -43,25 +49,148 @@ function apply_expect(expect, ret) {
 	return ret;
 }
 
-/* ---- 桩 ---- */
-const els = {};
-function el(id) {
-	return els[id] || (els[id] = { id, textContent: '', disabled: false });
+/* ---- 极简假 DOM：够用就行（append / 清空 / 按 id 或 class 查找）---- */
+function append(parent, child) {
+	child.parentNode = parent;
+	parent.children.push(child);
+	return child;
 }
 
+function wipe(node) {
+	for (const c of node.children)
+		c.parentNode = null;
+
+	node.children = [];
+	node.textContent = '';
+}
+
+function find_by_id(node, id) {
+	if (!node)
+		return null;
+
+	if (node.id === id)
+		return node;
+
+	for (const c of node.children) {
+		const hit = find_by_id(c, id);
+		if (hit)
+			return hit;
+	}
+
+	return null;
+}
+
+function find_by_class(node, cls) {
+	if (!node)
+		return null;
+
+	if ((' ' + node.class + ' ').indexOf(' ' + cls + ' ') > -1)
+		return node;
+
+	for (const c of node.children) {
+		const hit = find_by_class(c, cls);
+		if (hit)
+			return hit;
+	}
+
+	return null;
+}
+
+let next_id = 0;
+function E(tag, attrs, children) {
+	const a = (attrs && !Array.isArray(attrs)) ? attrs : {};
+	const node = {
+		tag: tag,
+		id: a.id || null,
+		class: a.class || '',
+		attrs: a,
+		children: [],
+		parentNode: null,
+		textContent: '',
+		disabled: false,
+		keys: next_id++,
+		/* LuCI 的 DOM 辅助方法，视图片段里可能用到 */
+		appendChild: function(c) { return append(this, c); },
+		insertBefore: function(c, ref) {
+			const i = ref ? this.children.indexOf(ref) : -1;
+			c.parentNode = this;
+			if (i < 0)
+				this.children.push(c);
+			else
+				this.children.splice(i, 0, c);
+
+			return c;
+		},
+		querySelector: function(sel) { return sel.charAt(0) == '.' ? find_by_class(this, sel.slice(1)) : null; }
+	};
+
+	const kids = Array.isArray(attrs) ? attrs : (children || []);
+
+	for (const k of kids) {
+		if (k == null)
+			continue;
+
+		if (typeof k == 'string')
+			node.textContent += k;
+		else
+			append(node, k);
+	}
+
+	return node;
+}
+
+let doc_root = null;
+const document = { getElementById: (id) => find_by_id(doc_root, id) };
+
+/* ---- 其它桩 ---- */
 String.prototype.format = function(...a) {
 	return this.replace(/%s/g, () => a.shift());
 };
 
-let cfg = {};              /* UCI 配置桩 */
-let daemon = 'ok';         /* ok / missing / refused / last_error */
+let cfg = {};
+let daemon = 'ok';           /* ok / missing / refused / last_error */
 let last_error = '';
 let recon_calls = 0;
 let notifications = [];
+const maps = [];             /* 视图创建过的 Map 实例，用例 10 用它们模拟 LuCI 的重建 */
 
 const OBJECT_MISSING = new Error('RPCError: RPC call to hust-network-login/status failed with error -32000: Object not found at ClassConstructor.handleCallReply');
 
-const form = { Map: function() {} };
+/* 表单桩：Map.render() 产出 map 元素（h2 + 一个 section）；
+ * Map.renderContents() 照搬 LuCI —— 清空 map 元素内部再重画。 */
+const form = {
+	Map: function(config, title) {
+		this.config = config;
+		this.title = title;
+		this.el = null;
+		maps.push(this);
+	},
+	NamedSection: function() {},
+	Flag: function() {},
+	Value: function() {}
+};
+form.Map.prototype.section = function() {
+	return {
+		anonymous: false,
+		options: [],
+		option: function() { const o = {}; this.options.push(o); return o; }
+	};
+};
+form.Map.prototype.renderContents = function() {
+	if (this.el)
+		wipe(this.el);
+	else
+		this.el = E('div', { 'id': 'cbi-' + this.config, 'class': 'cbi-map' });
+
+	append(this.el, E('h2', [ this.title || '' ]));
+	append(this.el, E('div', { 'class': 'cbi-section' }));
+
+	return Promise.resolve(this.el);
+};
+form.Map.prototype.render = function() {
+	return this.renderContents();
+};
+
 const poll = { add: function() {} };
 const rpc = {
 	declare(opts) {
@@ -94,32 +223,26 @@ const uci = {
 	load: () => Promise.resolve()
 };
 const ui = {
-	addNotification(title, node, kind) { notifications.push({ title, text: node.children[0], kind }); },
+	addNotification(title, node, kind) { notifications.push({ title, text: node.textContent, kind }); },
 	createHandlerFn(o, m) { return o[m].bind(o); }
 };
 const view = { extend: (o) => o };
 const L = { bind: (fn, self) => fn.bind(self) };
-const E = (tag, attrs, children) => ({
-	tag,
-	attrs: Array.isArray(attrs) ? {} : attrs,
-	children: Array.isArray(attrs) ? attrs : children
-});
 const _ = (s) => s;
-const document = { getElementById: (id) => els[id] || null };
 
 const v = new Function('form', 'poll', 'rpc', 'uci', 'ui', 'view', 'L', 'E', '_', 'document', src)(
 	form, poll, rpc, uci, ui, view, L, E, _, document);
 
-/* 视图 render() 里创建的状态 span / 重连按钮，这里手工"挂"到页面上 */
-el('hust-status-state');
-el('hust-status-error');
-el('hust-reconnect');
-
-const state = () => el('hust-status-state').textContent;
-const err = () => el('hust-status-error').textContent;
-const btn_disabled = () => el('hust-reconnect').disabled;
+const state = () => { const n = document.getElementById('hust-status-state'); return n ? n.textContent : null; };
+const err = () => { const n = document.getElementById('hust-status-error'); return n ? n.textContent : null; };
+const btn = () => document.getElementById('hust-reconnect');
+const btn_disabled = () => { const b = btn(); return b ? b.disabled : null; };
 
 (async () => {
+	/* 先渲染一次页面（真实流程就是这样：render() 之后才有这些 DOM 节点） */
+	doc_root = await v.render();
+	assert.ok(state() !== null && btn() !== null, '渲染后应有状态区与重连按钮');
+
 	/* 1. 正常 */
 	cfg = { enabled: '1', username: 'M2020123123', password: 'x' };
 	daemon = 'ok';
@@ -182,19 +305,19 @@ const btn_disabled = () => el('hust-reconnect').disabled;
 
 	/* 6. 缺项时点重连：只提示，不发起 RPC */
 	notifications = []; recon_calls = 0;
-	await v.handleReconnect({ currentTarget: el('hust-reconnect') });
+	await v.handleReconnect({ currentTarget: btn() });
 	assert.strictEqual(recon_calls, 0, '缺项时不应该调用 reconnect');
 	assert.strictEqual(notifications.length, 1);
 	assert.strictEqual(notifications[0].kind, 'warning');
 	assert.match(notifications[0].text, /^Missing required settings: Password/);
 	console.log('ok  6. 缺项时点重连：不发 RPC，只提示缺什么');
 
-	/* 7. 配置齐全 + 重连成功：必须解析守护进程的回复，不能变成 unknown error */
+	/* 7. 配置齐全 + 重连成功：解析守护进程回复，弹 info 提示（不能变成 unknown error） */
 	cfg.password = 'x';
 	notifications = []; recon_calls = 0;
-	await v.handleReconnect({ currentTarget: el('hust-reconnect') });
+	await v.handleReconnect({ currentTarget: btn() });
 	assert.strictEqual(recon_calls, 1);
-	assert.strictEqual(notifications.length, 1, '应有一条通知');
+	assert.strictEqual(notifications.length, 1, '成功应有一条提示');
 	assert.strictEqual(notifications[0].kind, 'info', '成功应是 info，实际：' + notifications[0].kind + ' / ' + notifications[0].text);
 	assert.doesNotMatch(notifications[0].text, /unknown error/);
 	assert.match(notifications[0].text, /signal/);
@@ -204,18 +327,32 @@ const btn_disabled = () => el('hust-reconnect').disabled;
 	/* 8. 守护进程吞了请求（result:false + error）：显示它的原话 */
 	daemon = 'refused';
 	notifications = [];
-	await v.handleReconnect({ currentTarget: el('hust-reconnect') });
+	await v.handleReconnect({ currentTarget: btn() });
 	assert.strictEqual(notifications[0].kind, 'warning');
 	assert.match(notifications[0].text, /Operation not permitted/);
 	console.log('ok  8. 守护进程拒绝：显示 error = ' + notifications[0].text);
 
 	/* 9. 配置齐全但服务没跑：提示 restart，不误报缺项 */
 	daemon = 'missing';
-	notifications = [];
 	await v.refresh_status();
 	assert.match(err(), /no ubus object/);
 	assert.doesNotMatch(err(), /Missing required settings/);
 	console.log('ok  9. 配置齐全但服务没跑：提示 restart，不误报缺项');
+
+	/* 10. 保存/重置后 map 内部 DOM 重建：状态区与按钮必须还在，且还能刷新。
+	 *     （Map.save()/reset() 结尾都会调 renderContents()，它清空 map 元素内部） */
+	assert.ok(maps.length > 0, '应能拿到视图创建的 Map 实例');
+	maps[0].renderContents();        /* = 点「保存并应用」/「重置」时 LuCI 干的事 */
+
+	assert.ok(document.getElementById('hust-status-state'), '重建后状态区不应消失（要放在 map 元素外面）');
+	assert.ok(document.getElementById('hust-status-error'), '重建后「最近错误」行不应消失');
+	assert.ok(document.getElementById('hust-reconnect'), '重建后重连按钮不应消失');
+
+	cfg = { enabled: '1', username: 'M2020123123', password: 'x' };
+	daemon = 'ok';
+	await v.refresh_status();
+	assert.strictEqual(state(), 'Online', '重建后状态区还应能被刷新');
+	console.log('ok 10. 保存/重置重建 map 内部 DOM 后：状态区与按钮仍在，且能继续刷新');
 
 	console.log('\n视图逻辑全部通过');
 })().catch((e) => {

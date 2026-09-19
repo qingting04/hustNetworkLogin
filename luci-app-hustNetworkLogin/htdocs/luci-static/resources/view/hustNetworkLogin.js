@@ -223,10 +223,16 @@ return view.extend({
 			this.refresh_status();
 			poll.add(L.bind(this.refresh_status, this));
 
-			/* 状态区放在页面标题之后、设置表单之前 */
-			mapEl.insertBefore(box, mapEl.querySelector('.cbi-section'));
-
-			return mapEl;
+			/*
+			 * 状态区必须放在 map 元素【外面】，所以这里返回一个容器把两者并排：
+			 * 页脚的「保存 / 保存并应用 / 重置」最终都会走到 Map.save()/reset()，
+			 * 而它们结尾必定调用 Map.renderContents()（form.js）—— 那里用
+			 * dom.content(mapEl, null) 把 map 元素内部清空后重画。map 元素本身由
+			 * this.root 复用、不会换，页脚按钮也在 map 外面，所以只有插在 map
+			 * 内部的节点会被冲掉：表现就是点完「保存并应用」状态区和按钮突然消失，
+			 * 刷新页面才回来（再看 set_text 也只是 getElementById 拿到 null 静默跳过）。
+			 */
+			return E('div', {}, [ box, mapEl ]);
 		}.bind(this));
 	}
 });
