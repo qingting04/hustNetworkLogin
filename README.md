@@ -167,11 +167,11 @@ uci commit hust-network-login && /etc/init.d/hust-network-login reload
 
 ```sh
 ubus list | grep hust-network-login                 # 对象在不在总线上
-cat /tmp/run/hust-network-login.state               # 守护进程自己写的运行状态
-logread -e hust-network-login | tail -20            # 它的日志
+ubus call hust-network-login status                 # 状态 + 控制面自检（ubus 字段）
+logread -e hust-network-login | tail -20            # 它的日志（含控制面状态变化）
 ```
 
-`/tmp/run/hust-network-login.state` 里的 `ubus=` 字段就是控制面的自检结果：
+`ubus call hust-network-login status` 里的 `ubus` 字段就是控制面的自检结果：
 
 | ubus= | 含义 |
 |-------|------|
@@ -255,7 +255,7 @@ fork 后按自己路由器改 workflow 顶部 4 个变量（`TARGET` / `SUBTARGE
 
 ## 说明
 
-- **状态与控制的实现**：C 守护进程自己注册 ubus 对象 `hust-network-login`（`uloop` + `libubus`，方法 `status` / `reconnect`）。登录循环跑在单独的 worker 线程，主线程只跑事件循环 —— 所以**进程在，对象就在**，不需要 rpcd 的 ucode 插件（那类插件一旦没加载，页面就彻底失能而且看不出原因）。控制面自带自愈：连不上 ubusd（或 ubusd 中途重启、对象从总线消失）时，每 5 秒重连一次并重新发布对象 —— 页面上就是「服务未运行 → 自己恢复」的过程，不需要人工干预；`reconnect` 用 `pthread_kill(worker, SIGHUP)` 复用现成的打断链路（`CURLOPT_XFERINFOFUNCTION` 中止传输 + `sleep_interruptible` 提前返回），秒级生效、不重启进程、认证与加密代码零改动。状态同时原子写入 `/tmp/run/hust-network-login.state`（tmpfs，重启清空）供 SSH 直接查看 —— 其中 `ubus=` 字段（`registered` / `unavailable` / `reconnecting` / `no-object(N)`）就是控制面自检结果；PID 写 `/tmp/run/hust-network-login.pid`。
-- **两条路径别混**：① 只想立刻重新认证（配置没变）→ 界面「重连」/ `ubus call hust-network-login reconnect`，守护进程收到 `SIGHUP`，经 libcurl 进度回调中断当前请求并马上重跑一轮（**不重启进程**）；② 改了配置（账号/密码/探测地址/检测周期）→ 「保存并应用」或 `uci commit ... && /etc/init.d/hust-network-login reload`，这条会**重启服务**，因为配置是启动时通过环境变量注入进程的。`SIGTERM`/`SIGINT` 会写 `state=stopped`、删 pidfile 后干净退出（配合 procd）。详细过程看 syslog：`logread -e hust-network-login`。
+- **状态与控制的实现**：C 守护进程自己注册 ubus 对象 `hust-network-login`（`uloop` + `libubus`，方法 `status` / `reconnect`）。登录循环跑在单独的 worker 线程，主线程只跑事件循环 —— 所以**进程在，对象就在**，不需要 rpcd 的 ucode 插件（那类插件一旦没加载，页面就彻底失能而且看不出原因）。控制面自带自愈：连不上 ubusd（或 ubusd 中途重启、对象从总线消失）时，每 5 秒重连一次并重新发布对象 —— 页面上就是「服务未运行 → 自己恢复」的过程，不需要人工干预；`reconnect` 用 `pthread_kill(worker, SIGHUP)` 复用现成的打断链路（`CURLOPT_XFERINFOFUNCTION` 中止传输 + `sleep_interruptible` 提前返回），秒级生效、不重启进程、认证与加密代码零改动。状态不再自己落盘（原来那份 `/tmp/run/hust-network-login.state` 已删）：查询一律走 `ubus call hust-network-login status`，其中 `ubus` 字段（`registered` / `unavailable` / `reconnecting` / `no-object(N)`）就是控制面自检结果，状态变化同时记一条 syslog（`logread` 可见）；PID 写 `/tmp/run/hust-network-login.pid`。
+- **两条路径别混**：① 只想立刻重新认证（配置没变）→ 界面「重连」/ `ubus call hust-network-login reconnect`，守护进程收到 `SIGHUP`，经 libcurl 进度回调中断当前请求并马上重跑一轮（**不重启进程**）；② 改了配置（账号/密码/探测地址/检测周期）→ 「保存并应用」或 `uci commit ... && /etc/init.d/hust-network-login reload`，这条会**重启服务**，因为配置是启动时通过环境变量注入进程的。`SIGTERM`/`SIGINT` 会把状态置为 `stopped`、删 pidfile 后干净退出（配合 procd）。详细过程看 syslog：`logread -e hust-network-login`。
 - **包名/显示名是小驼峰 `hustNetworkLogin`**；但 UCI config 名、二进制名、init.d 脚本名保持 kebab-case `hust-network-login`（OpenWrt 系统机制约定）。
 - **LuCI 版本**：JS 框架需 LuCI 23.05+。

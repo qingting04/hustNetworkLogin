@@ -6,8 +6,9 @@
  * 配置：环境变量 HUST_NETWORK_LOGIN_USERNAME / HUST_NETWORK_LOGIN_PASSWORD，
  *       或命令行传配置文件路径（两行：第一行用户名，第二行密码）。
  *
- * 状态上报：把 state / last_error / updated / ubus 写入 /tmp/run/hust-network-login.state
- *           （SSH 里 cat 就能看；ubus= 是控制面自检结果），PID 另写 .pid 文件。
+ * 状态上报：全部走 ubus —— `ubus call hust-network-login status` 返回
+ *           state / last_error / updated / running / pid / ubus（ubus 字段是控制面自检结果）；
+ *           控制面状态变化另记一条 syslog（logread 可见）。PID 另写 .pid 文件。
  * 控制面：进程自己注册 ubus 对象 hust-network-login（uloop + libubus），
  *       页面与脚本直接 `ubus call hust-network-login status|reconnect`，
  *       不再依赖 rpcd 的 ucode 插件（插件加载失败会让页面彻底失能）。
@@ -42,12 +43,7 @@ static const char *test_url =
 /* 在线检测间隔（秒），可用环境变量 HUST_NETWORK_LOGIN_CHECK_INTERVAL 覆盖 */
 static int check_interval = 15;
 
-/*
- * 运行状态上报：把状态与最近一次错误写进一个小文件，SSH 里直接 cat 就能看
- * （ubus 的 status 走内存快照，不读这个文件）。路径选没符号链接的 /tmp/run，
- * 是为了让脚本/工具做 realpath 校验时不会踩到 /tmp 下的软链。
- */
-static const char *state_file = "/tmp/run/hust-network-login.state";
+/* PID 文件：给 init 脚本 / 其它工具找进程用（状态查询请走 ubus status） */
 static const char *pid_file = "/tmp/run/hust-network-login.pid";
 static char last_error[224];
 
@@ -108,56 +104,23 @@ static void set_error(const char *fmt, ...)
 }
 
 /*
- * 把内存快照原子落盘：先写临时文件再 rename，避免读到写了一半的内容。
- * 文件是给人和脚本（SSH）看的；ubus 的 status 走内存快照，不读这个文件。
+ * 更新内存快照（state / updated）。状态不再落盘：
+ * 查询走 ubus status（内存快照），控制面状态由 ubus 字段 + syslog 暴露。
  * 状态：idle 启动中 / probe 探测中 / login 认证中 / online 已在线 /
  *       error 登录失败重试中 / stopped 已停止
  */
-static void flush_state_file(void)
-{
-	char state[sizeof(st_state)];
-	char err[sizeof(last_error)];
-	char ub[sizeof(st_ubus)];
-	char tmp[sizeof("/tmp/run/hust-network-login.state.tmp")];
-	FILE *f;
-	long now;
-
-	pthread_mutex_lock(&st_lock);
-	snprintf(state, sizeof(state), "%s", st_state);
-	snprintf(err, sizeof(err), "%s", last_error);
-	snprintf(ub, sizeof(ub), "%s", st_ubus);
-	now = st_updated;
-	pthread_mutex_unlock(&st_lock);
-
-	snprintf(tmp, sizeof(tmp), "%s.tmp", state_file);
-
-	f = fopen(tmp, "w");
-	if (!f)
-		return;
-
-	fprintf(f, "state=%s\n", state);
-	fprintf(f, "last_error=%s\n", err);
-	fprintf(f, "updated=%ld\n", now);
-	fprintf(f, "ubus=%s\n", ub);
-	fclose(f);
-
-	rename(tmp, state_file);
-}
-
 static void write_state(const char *state)
 {
 	pthread_mutex_lock(&st_lock);
 	snprintf(st_state, sizeof(st_state), "%s", state);
 	st_updated = (long)time(NULL);
 	pthread_mutex_unlock(&st_lock);
-
-	flush_state_file();
 }
 
-/* 记录控制面状态（registered / no-object(N) / reconnecting / unavailable），并立刻
- * 反映到状态文件里，这样 SSH 上一眼就能看出「页面读不到状态」到底是进程没跑、
- * ubus 没连上、还是注册被 ubusd 拒了。状态没变就不重写文件，也不重复刷日志。
- * 返回是否发生了变化。 */
+/* 记录控制面状态（registered / no-object(N) / reconnecting / unavailable）：写进内存快照，
+ * 由 ubus status 的 "ubus" 字段对外暴露；状态变化时另记一条 syslog，这样
+ * 「页面读不到状态」时看 logread 就能分清是进程没跑、ubus 没连上、还是注册被 ubusd 拒了。
+ * 状态没变就不重复刷日志。返回是否发生了变化。 */
 static int set_ubus_state(const char *s)
 {
 	int changed;
@@ -169,7 +132,7 @@ static int set_ubus_state(const char *s)
 	pthread_mutex_unlock(&st_lock);
 
 	if (changed)
-		flush_state_file();
+		syslog(LOG_INFO, "ubus control plane: %s", s);
 
 	return changed;
 }
@@ -594,6 +557,7 @@ static int ubus_method_status(struct ubus_context *ctx, struct ubus_object *obj,
 	struct blob_buf bb;
 	char state[sizeof(st_state)];
 	char err[sizeof(last_error)];
+	char ub[sizeof(st_ubus)];
 	long updated;
 
 	(void)obj; (void)method; (void)msg;
@@ -601,6 +565,7 @@ static int ubus_method_status(struct ubus_context *ctx, struct ubus_object *obj,
 	pthread_mutex_lock(&st_lock);
 	snprintf(state, sizeof(state), "%s", st_state);
 	snprintf(err, sizeof(err), "%s", last_error);
+	snprintf(ub, sizeof(ub), "%s", st_ubus);
 	updated = st_updated;
 	pthread_mutex_unlock(&st_lock);
 
@@ -612,6 +577,7 @@ static int ubus_method_status(struct ubus_context *ctx, struct ubus_object *obj,
 	blobmsg_add_u64(&bb, "updated", (uint64_t)updated);
 	blobmsg_add_boolean(&bb, "running", true);
 	blobmsg_add_u32(&bb, "pid", (uint32_t)getpid());
+	blobmsg_add_string(&bb, "ubus", ub);
 
 	ubus_send_reply(ctx, req, bb.head);
 	blob_buf_free(&bb);
@@ -752,7 +718,7 @@ static void ubus_attach(void)
 		syslog(LOG_INFO, "ubus object hust-network-login registered");
 	}
 	else {
-		/* 把 ubusd 返回的错误码也写进状态文件，方便 SSH 上一眼看懂
+		/* 错误码同时进 syslog 和 ubus status 的 ubus 字段，方便一眼看懂
 		 * （6=权限不足，通常是 ubusd 的 ACL 不允许该用户注册对象） */
 		char buf[24];
 
