@@ -81,7 +81,7 @@ if [ "${1:-}" != "--inside" ]; then
 	[ -f "$PREFIX/sbin/ubusd" ]       || fetch_build ubus openwrt/ubus
 
 	echo "== 编译守护进程（真 main.c + 自带 http.h/modexp.h，只桩 syslog） =="
-	gcc -Wall -Wextra -Werror -I"$PKG/src" -o "$DAEMON" \
+	gcc -Wall -Wextra -Werror -I"$PKG/src" -I"$PREFIX/include" -o "$DAEMON" \
 		"$MAIN" "$STUB/syslog_stub.c" \
 		-L"$PREFIX/lib" -lubus -lubox -ljson-c -pthread -Wl,-rpath,"$PREFIX/lib" \
 		|| { echo "FAIL 编译守护进程"; exit 1; }
@@ -122,12 +122,12 @@ print(d.get('$2'))
 " 2>/dev/null
 }
 
-start_daemon() { # start_daemon <test_url>
+start_daemon() { # start_daemon <test_url> [在线检测周期秒，默认 15]
 	rm -f "$STATE"
 	HUST_NETWORK_LOGIN_USERNAME=testuser \
 	HUST_NETWORK_LOGIN_PASSWORD=testpass \
 	HUST_NETWORK_LOGIN_TEST_URL="$1" \
-	HUST_NETWORK_LOGIN_CHECK_INTERVAL=3 \
+	HUST_NETWORK_LOGIN_CHECK_INTERVAL="${2:-15}" \
 	"$DAEMON" >>"$LOG" 2>&1 &
 	DPID=$!
 }
