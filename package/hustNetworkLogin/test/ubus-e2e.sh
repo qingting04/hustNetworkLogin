@@ -297,6 +297,21 @@ check $? "退出后对象从总线注销"
 
 kill "$UPID" "$PPORT" 2>/dev/null
 
+# 成功时也用 ::warning:: 报一句「门户实际看到了什么」：GitHub 的 check-run annotation 是
+# 公开可读的，这样在没有 job 日志权限的环境里也能核对登录请求打到了哪个路径。
+python3 -c "
+import json
+try:
+    d = json.load(open('$REPORT'))
+except Exception:
+    raise SystemExit(0)
+posts = [r for r in d.get('requests', []) if r.startswith('POST')]
+print('::warning::portal: login_count=%s cipher_ok=%s path_mismatch=%s' % (
+    d.get('login_count'), d.get('cipher_ok'), d.get('path_mismatch')))
+for r in posts[-2:]:
+    print('::warning::portal POST line: ' + r[:200])
+" 2>/dev/null
+
 # 失败时把现场打印出来（CI 日志里一眼能看到是哪一步、守护进程说了什么）
 if [ "$fails" != 0 ]; then
 	echo
