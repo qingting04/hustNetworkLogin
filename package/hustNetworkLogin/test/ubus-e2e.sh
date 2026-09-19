@@ -267,6 +267,20 @@ has_object
 check $? "退出后对象从总线注销"
 
 kill "$UPID" "$PPORT" 2>/dev/null
+
+# 失败时把现场打印出来（CI 日志里一眼能看到是哪一步、守护进程说了什么）
+if [ "$fails" != 0 ]; then
+	echo
+	echo "=============== 现场 ==============="
+	echo "--- 状态文件 $STATE ---"; cat "$STATE" 2>/dev/null
+	echo "--- 门户报告 $REPORT ---"; cat "$REPORT" 2>/dev/null
+	echo "--- ubus list ---"; "$UBUS" list 2>&1
+	echo "--- 门户日志（尾 10 行）---"; tail -10 "$WORK/portal.log" 2>/dev/null
+	echo "--- ubusd 日志（尾 10 行）---"; tail -10 "$WORK/ubusd.log" 2>/dev/null
+	echo "--- 守护进程日志（尾 40 行）---"; tail -40 "$LOG" 2>/dev/null
+	echo "==================================="
+fi
+
 echo
 echo "$fails 项失败（守护进程日志：$LOG，门户报告：$REPORT）"
 [ "$fails" = 0 ]
