@@ -10,11 +10,12 @@
 
 > 为什么用 C 重写：OpenWrt 原生就是 C 交叉编译工具链（`$(TARGET_CC)` + musl），用 C 可以做到「menuconfig 选架构 → make 直接交叉编译」，不依赖任何预编译二进制；而 Rust 交叉编译在 OpenWrt 里需要额外工具链，通常只能按架构下载预编译产物。
 
-密码加密算法（`BE(密码 ">" mac) ^ 65537 mod n`）已对照上游官方测试用例**逐字节验证一致**。
+密码加密算法（`BE(密码 ">" mac) ^ 65537 mod n`）已对照上游官方测试用例**逐字节验证一致**；
+实现是自带的 `src/modexp.h`（约 100 行模幂），与 Python 的 `pow(m, e, n)` 做 300+ 组随机差分对拍，CI 每跑必过。
 
 ## 特性
 
-- 纯 C 实现（`libcurl` + `libopenssl`），OpenWrt 原生交叉编译
+- 纯 C 实现（只依赖 `libcurl`；RSA 公钥运算 `src/modexp.h` 自带，不依赖 OpenSSL），OpenWrt 原生交叉编译
 - 掉线 15 秒检测并自动重连
 - LuCI 网页配置（JS 框架，需 LuCI 23.05+，ImmortalWrt 23.05/25.x 均支持）
 - **ubus 接口**：`ubus call hust-network-login status` / `reconnect`（**由 C 守护进程自己注册，不需要 rpcd 插件**），脚本或其它服务也能调
@@ -93,7 +94,9 @@ make package/luci-app-hustNetworkLogin/compile V=s
 ```sh
 python3 luci-app-hustNetworkLogin/test/check.py     # 默认值三处一致 / 翻译覆盖 / JSON+JS 语法
 node    luci-app-hustNetworkLogin/test/view-test.js # 视图逻辑回归（桩掉 LuCI 环境，跑真实视图源码）
-sh package/hustNetworkLogin/test/ubus-e2e.sh        # ubus 控制面端到端（真 ubusd + 桩掉 curl/openssl 的真 main.c）
+cc package/hustNetworkLogin/test/test_encrypt.c -o /tmp/test_encrypt && /tmp/test_encrypt   # 加密 KAT（上游向量，不需要 OpenSSL）
+python3 package/hustNetworkLogin/test/modexp-diff.py # 加密随机差分（Python 真值对拍）
+sh package/hustNetworkLogin/test/ubus-e2e.sh        # ubus 控制面端到端（真 ubusd + 桩掉 curl 的真 main.c）
 ```
 
 `view-test.js` 里 `rpc.declare` 的 `expect` 处理是**逐字照搬** `luci-static/resources/rpc.js`
@@ -220,9 +223,11 @@ ubus call hust-network-login status                 # 起来了就能直接读�
 .
 ├── package/hustNetworkLogin/          # C 软件包
 │   ├── Makefile                       #   标准 C 包，$(TARGET_CC) 交叉编译
-│   ├── src/main.c                     #   C 源码（登录 + RSA + 检测 + ubus 控制面）
-│   ├── test/test_encrypt.c            #   加密自测（对照上游用例）
-│   ├── test/ubus-e2e.sh + stubs/      #   ubus 控制面端到端自测（真 ubusd + 桩掉 curl/openssl）
+│   ├── src/main.c                     #   C 源码（登录 + 检测 + ubus 控制面）
+│   ├── src/modexp.h                   #   RSA 公钥模幂（自带，替代 OpenSSL）
+│   ├── test/test_encrypt.c            #   加密 KAT（上游向量 + 边界用例）
+│   ├── test/modexp-diff.py            #   加密随机差分（对拍 Python pow）
+│   ├── test/ubus-e2e.sh + stubs/      #   ubus 控制面端到端自测（真 ubusd + 桩掉 curl）
 │   └── files/
 │       ├── etc/init.d/hust-network-login   # procd 服务脚本
 │       └── etc/config/hust-network-login   # UCI 默认配置

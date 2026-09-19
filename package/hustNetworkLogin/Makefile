@@ -2,8 +2,8 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=hustNetworkLogin
 PKG_VERSION:=0.2.0
-PKG_RELEASE:=4
-PKG_BUILD_DEPENDS:=curl openssl libubox libubus
+PKG_RELEASE:=5
+PKG_BUILD_DEPENDS:=curl libubox libubus
 
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=HUST campus network
@@ -17,7 +17,7 @@ define Package/hustNetworkLogin
   CATEGORY:=Network
   TITLE:=HUST campus network auto login (C)
   URL:=https://github.com/black-binary/hust-network-login
-  DEPENDS:=+libcurl +libopenssl +libubus +libubox
+  DEPENDS:=+libcurl +libubus +libubox
 endef
 
 define Package/hustNetworkLogin/description
@@ -34,7 +34,7 @@ define Build/Compile
 	$(TARGET_CC) $(TARGET_CFLAGS) -pthread \
 		-I$(STAGING_DIR)/usr/include \
 		-o $(PKG_BUILD_DIR)/hust-network-login $(PKG_BUILD_DIR)/main.c \
-		$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/lib -lcurl -lcrypto -lubus -lubox -pthread
+		$(TARGET_LDFLAGS) -L$(STAGING_DIR)/usr/lib -lcurl -lubus -lubox -pthread
 endef
 
 define Package/hustNetworkLogin/install

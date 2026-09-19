@@ -24,6 +24,12 @@ jobs:
       - name: 视图逻辑回归（node 跑真实视图源码，含重连回复解析）
         run: node luci-app-hustNetworkLogin/test/view-test.js
 
+      - name: 加密自测（上游 KAT + Python 随机差分，不需要 OpenSSL）
+        run: |
+          cc -Wall -Wextra -Werror -o /tmp/test_encrypt package/hustNetworkLogin/test/test_encrypt.c
+          /tmp/test_encrypt
+          python3 package/hustNetworkLogin/test/modexp-diff.py
+
       - name: Install zstd
         run: sudo apt-get update && sudo apt-get install -y zstd
 

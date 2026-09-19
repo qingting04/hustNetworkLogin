@@ -3,7 +3,7 @@
 #
 # 为什么需要它：ubusd 只允许 uid 0 发布对象，普通用户直接跑 ubusd 时守护进程永远注册
 # 不上（上一版就是因此没能在离线环境验证注册）。这个脚本在 `unshare -r`（映射成 uid 0）
-# 里跑真实的 ubusd，用桩掉 libcurl/OpenSSL 的方式编译真实的 src/main.c，验证：
+# 里跑真实的 ubusd，用桩掉 libcurl 的方式编译真实的 src/main.c（RSA 运算已自带，无需 OpenSSL 桩），验证：
 #   1. 对象发布成功（ubus list 里有 hust-network-login）
 #   2. status / reconnect 返回的字段与 LuCI 视图约定一致（result 必须是布尔）
 #   3. ubusd 晚于守护进程启动 → 守护进程自动重试，对象自己出现（自愈）

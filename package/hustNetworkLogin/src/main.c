@@ -2,7 +2,8 @@
  * hust-network-login (C 版)
  * 华中科技大学校园网（深澜 ePortal）自动登录，掉线 15 秒自动重连。
  *
- * 依赖：libcurl（HTTP）、libcrypto/libopenssl（RSA 大数运算）。
+ * 依赖：libcurl（HTTP）。RSA 公钥运算（c = m^e mod n）在 src/modexp.h 里自带，
+ *       不再链接 OpenSSL —— 只为一个 BN_mod_exp 就从源码编译整套 OpenSSL 太贵。
  * 配置：环境变量 HUST_NETWORK_LOGIN_USERNAME / HUST_NETWORK_LOGIN_PASSWORD，
  *       或命令行传配置文件路径（两行：第一行用户名，第二行密码）。
  *
@@ -27,7 +28,7 @@
 #include <ctype.h>
 #include <pthread.h>
 #include <curl/curl.h>
-#include <openssl/bn.h>
+#include "modexp.h"
 #include <libubox/utils.h>
 #include <libubox/blobmsg.h>
 #include <libubus.h>
@@ -301,41 +302,20 @@ static char *http_post(const char *url, const char *body)
 /*
  * RSA 加密：c = BE(password ">" mac) ^ e mod n，输出小写 hex，左补零到 256 字符。
  * 等价于 Rust 的 BigUint::from_bytes_be(...).modpow(65537, n)。
+ * 运算在 src/modexp.h 里自带实现（不依赖 OpenSSL）。
  */
 static char *encrypt_pass(const char *password, const char *mac)
 {
 	char msg[256];
-	BIGNUM *e = NULL, *n = NULL, *m = NULL, *c = NULL;
-	BN_CTX *ctx = NULL;
-	char *hex = NULL, *out = NULL;
-	size_t len, zeros, i;
+	char *out;
+
+	out = malloc(MODEXP_HEX + 1);
+	if (!out)
+		return NULL;
 
 	snprintf(msg, sizeof(msg), "%s>%s", password, mac);
+	modexp_pow_hex(out, (const uint8_t *)msg, strlen(msg), MODULUS, EXPONENT);
 
-	ctx = BN_CTX_new();
-	c = BN_new();
-	BN_hex2bn(&e, EXPONENT);
-	BN_hex2bn(&n, MODULUS);
-	m = BN_bin2bn((const unsigned char *)msg, (int)strlen(msg), NULL);
-
-	BN_mod_exp(c, m, e, n, ctx);
-
-	hex = BN_bn2hex(c); /* 大写，无前导零 */
-	len = strlen(hex);
-	zeros = (len < 256) ? (256 - len) : 0;
-
-	out = malloc(257);
-	memset(out, '0', zeros);
-	for (i = 0; i < len; i++)
-		out[zeros + i] = (char)tolower((unsigned char)hex[i]);
-	out[256] = '\0';
-
-	OPENSSL_free(hex);
-	BN_free(e);
-	BN_free(n);
-	BN_free(m);
-	BN_free(c);
-	BN_CTX_free(ctx);
 	return out;
 }
 
