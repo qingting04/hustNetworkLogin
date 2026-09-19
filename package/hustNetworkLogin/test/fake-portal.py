@@ -33,7 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAIN_C = os.path.join(os.path.dirname(HERE), 'src', 'main.c')
 
 ARGS = argparse.Namespace(port=0, work='/tmp', user='', password='', mac='')
-REPORT = {'probe_hits': [], 'login_count': 0, 'errors': []}
+REPORT = {'probe_hits': [], 'login_count': 0, 'errors': [], 'requests': []}
 LOCK = threading.Lock()
 
 
@@ -89,6 +89,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         with LOCK:
             REPORT['probe_hits'].append(self.path)
+            REPORT['requests'].append('GET ' + self.requestline)
             save_report()
 
         if self.path.startswith('/generate_204'):
@@ -110,9 +111,13 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get('Content-Length') or 0)
         body = self.rfile.read(n).decode('utf-8', 'replace')
 
+        with LOCK:
+            REPORT['requests'].append('POST ' + self.requestline)
+
+        # 先收下所有 POST（把路径记进报告），别因为路径不匹配就丢掉现场
         if not self.path.startswith('/ePortal/InterFace.do'):
-            self._send(404, b'not found')
-            return
+            REPORT['path_mismatch'] = self.path
+            save_report()
 
         want = cipher(ARGS.password, ARGS.mac)
         m = re.search(r'password=([0-9a-fA-F]{256})', body)

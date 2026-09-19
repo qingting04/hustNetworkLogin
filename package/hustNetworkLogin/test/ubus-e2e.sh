@@ -317,6 +317,18 @@ if [ "$fails" != 0 ]; then
 		n=$((n + 1))
 	done <"$FAILED" 2>/dev/null
 	echo "::error::state=$(state_field state) last_error=$(state_field last_error) ubus=$(state_field ubus)"
+	python3 -c "
+import json
+try:
+    d=json.load(open('$REPORT'))
+except Exception:
+    raise SystemExit(0)
+for r in d.get('requests', [])[-3:]:
+    print('::error::portal saw: ' + r[:200])
+if d.get('path_mismatch'):
+    print('::error::portal path_mismatch: ' + str(d['path_mismatch'])[:200])
+" 2>/dev/null
+
 	if [ -f "$WORK/phase-fail.log" ]; then
 		tail -6 "$WORK/phase-fail.log" | while IFS= read -r line; do
 			echo "::error::$line"
