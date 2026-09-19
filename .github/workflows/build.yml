@@ -68,8 +68,9 @@ jobs:
             immortalwrt-sdk-*/bin/packages/**/luci-app-hustNetworkLogin*.apk
             immortalwrt-sdk-*/bin/packages/**/luci-i18n-hustNetworkLogin*.apk
 
-  # 独立的端到端作业：在用户命名空间里跑真 ubusd，用桩掉 libcurl/OpenSSL 的真 main.c
-  # 验证「对象能不能注册、status/reconnect 字段对不对、ubusd 重启后能不能自愈」。
+  # 独立的端到端作业：在用户命名空间（uid 0）里跑真 ubusd + 真 main.c（HTTP/RSA 都自带，
+  # 只有 syslog 是桩），并起一个本机假门户把真实 HTTP 路径也走一遍 —— 验证「对象能不能注册、
+  # status/reconnect 字段对不对、登录密文是否正确、ubusd 重启后能不能自愈」。
   # 故意不设 needs、也不被 build 依赖：它挂了不影响出 apk（环境不允许 unshare 时自动 SKIP）。
   ubus-e2e:
     runs-on: ubuntu-22.04
@@ -77,5 +78,5 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: ubus 控制面端到端（真 ubusd + 真 main.c + 桩）
+      - name: ubus 控制面端到端（真 ubusd + 真 HTTP + 本机假门户）
         run: sh package/hustNetworkLogin/test/ubus-e2e.sh
