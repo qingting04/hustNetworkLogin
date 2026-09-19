@@ -101,11 +101,14 @@ LOG="$WORK/daemon.log"
 REPORT="$WORK/portal-report.json"
 fails=0
 
+FAILED="$WORK/e2e-failed.txt"
+
 check() { # check <0|1> <描述>
 	if [ "$1" = 0 ]; then
 		echo "  ok   $2"
 	else
 		echo "  FAIL $2"
+		echo "$2" >>"$FAILED"
 		fails=$((fails + 1))
 	fi
 }
@@ -145,7 +148,7 @@ mount -t tmpfs tmpfs /var/run 2>/dev/null && mkdir -p /var/run/ubus
 check $? "挂载 tmpfs 到 /var/run 并建出 /var/run/ubus（ubusd 默认 socket 目录）"
 
 mkdir -p "$RUN" "$WORK"
-rm -f "$STATE" "$RUN/hust-network-login.pid" "$LOG" "$REPORT"
+rm -f "$STATE" "$RUN/hust-network-login.pid" "$LOG" "$REPORT" "$FAILED"
 
 echo "-- 0. 起假门户与 ubusd"
 python3 "$HERE/fake-portal.py" --port "$PORT" --work "$WORK" >"$WORK/portal.log" 2>&1 &
@@ -279,6 +282,18 @@ if [ "$fails" != 0 ]; then
 	echo "--- ubusd 日志（尾 10 行）---"; tail -10 "$WORK/ubusd.log" 2>/dev/null
 	echo "--- 守护进程日志（尾 40 行）---"; tail -40 "$LOG" 2>/dev/null
 	echo "==================================="
+
+	# 同步发一份 ::error:: annotation：GitHub 的 job 日志要权限才能拉，但 check-run 的
+	# annotation 走公开 API 就能读 —— 排错时不必求人贴日志（每步最多 10 条）
+	n=0
+	while [ "$n" -lt 4 ] && IFS= read -r line; do
+		echo "::error::FAIL $line"
+		n=$((n + 1))
+	done <"$FAILED" 2>/dev/null
+	echo "::error::state=$(state_field state) last_error=$(state_field last_error) ubus=$(state_field ubus)"
+	tail -4 "$LOG" 2>/dev/null | while IFS= read -r line; do
+		echo "::error::daemon: $line"
+	done
 fi
 
 echo
