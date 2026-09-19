@@ -88,13 +88,17 @@ make package/hustNetworkLogin/compile V=s
 make package/luci-app-hustNetworkLogin/compile V=s
 ```
 
-### 自测（CI 会跑前两项）
+### 自测（CI 全跑）
 
 ```sh
 python3 luci-app-hustNetworkLogin/test/check.py     # 默认值三处一致 / 翻译覆盖 / JSON+JS 语法
-sh package/hustNetworkLogin/test/ubus-e2e.sh        # ubus 控制面端到端：真 ubusd + 桩掉 curl/openssl 的真 main.c
-                                                    #（验证注册、字段契约、ubusd 重启自愈、SIGTERM 干净退出）
+node    luci-app-hustNetworkLogin/test/view-test.js # 视图逻辑回归（桩掉 LuCI 环境，跑真实视图源码）
+sh package/hustNetworkLogin/test/ubus-e2e.sh        # ubus 控制面端到端（真 ubusd + 桩掉 curl/openssl 的真 main.c）
 ```
+
+`view-test.js` 里 `rpc.declare` 的 `expect` 处理是**逐字照搬** `luci-static/resources/rpc.js`
+的 —— 视图拿到的到底是「回复对象」还是被拆开的某个字段，全由那一小段决定（`expect` 写错时
+重连成功也会显示成 `unknown error`），桩不忠实就测不出这类问题。
 
 `ubus-e2e.sh` 会自己下载并编译 json-c / libubox / ubus（首次约 1~2 分钟，缓存在 `/tmp/hust-ubus-e2e`），
 然后在 `unshare -r` 里以 uid 0 跑真 ubusd —— 因为 **ubusd 只允许 uid 0 发布对象**，这是离线验证注册代码的唯一办法。
@@ -201,6 +205,14 @@ ubus call hust-network-login status                 # 起来了就能直接读�
 | `login rejected: ...` | 账号密码错、或已在别处登录被挤下线；冒号后是门户原话 |
 | `login request failed` | 门户地址能解析但请求发不出去（网关/防火墙问题） |
 
+**症状三：点「重连」弹 `Reconnect failed: unknown error`**
+
+守护进程其实受理了请求，是**旧版页面把回复解析错了**：`rpc.declare()` 的 `expect` 写成了
+`{ result: false, ... }`，rpc.js 只会取第一个 key，于是把回复里的 `result` 布尔值当成整个返回值，
+`res.result` 变成 undefined → 成功也走失败分支。`luci-app-hustNetworkLogin` **1.0.0-4** 起已修
+（`expect: { '': {} }`，与 `status` 一致），升级 luci-app 包后强刷页面（Ctrl+F5，清 JS 缓存）即可。
+判据：`ubus call hust-network-login reconnect` 能看到 `"result": true`，而页面偏说失败。
+
 ## 目录结构
 
 ```
@@ -217,6 +229,8 @@ ubus call hust-network-login status                 # 起来了就能直接读�
 │   ├── Makefile
 │   ├── htdocs/luci-static/resources/view/hustNetworkLogin.js
 │   ├── po/zh_Hans/luci-app-hustNetworkLogin.po   # 中文翻译（英文 msgid → 中文）
+│   ├── test/check.py                  #   一致性自检（默认值/翻译/JSON/JS 语法）
+│   ├── test/view-test.js              #   视图逻辑回归（node，含 reconnect 回复解析）
 │   └── root/
 │       ├── usr/share/luci/menu.d/luci-app-hustNetworkLogin.json
 │       ├── usr/share/rpcd/acl.d/luci-app-hustNetworkLogin.json   # 权限（uci + ubus status/reconnect）

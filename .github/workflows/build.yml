@@ -21,6 +21,9 @@ jobs:
       - name: Sanity checks（默认值一致性 / 翻译覆盖 / JS 语法）
         run: python3 luci-app-hustNetworkLogin/test/check.py
 
+      - name: 视图逻辑回归（node 跑真实视图源码，含重连回复解析）
+        run: node luci-app-hustNetworkLogin/test/view-test.js
+
       - name: Install zstd
         run: sudo apt-get update && sudo apt-get install -y zstd
 

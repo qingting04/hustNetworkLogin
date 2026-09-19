@@ -21,10 +21,16 @@ var callStatus = rpc.declare({
 	expect: { '': {} }
 });
 
+/*
+ * 注意 expect 必须写 { '': {} }（拿回复对象本身），不能写 { result: false, ... }：
+ * rpc.js 的 expect 逻辑只看第一个 key，写 result 会把回复里的 result 布尔值当成
+ * 整个返回值，于是 res.result 变成 undefined —— 明明重连成功也走 else 分支，
+ * 弹一句「Reconnect failed: unknown error」。status 同理。
+ */
 var callReconnect = rpc.declare({
 	object: 'hust-network-login',
 	method: 'reconnect',
-	expect: { result: false, error: '', action: '' }
+	expect: { '': {} }
 });
 
 function state_label(state) {
