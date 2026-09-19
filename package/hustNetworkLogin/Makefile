@@ -3,7 +3,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=hustNetworkLogin
 PKG_VERSION:=0.2.0
 PKG_RELEASE:=6
-PKG_BUILD_DEPENDS:=libubox libubus
+PKG_BUILD_DEPENDS:=libubox ubus
 
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=HUST campus network
