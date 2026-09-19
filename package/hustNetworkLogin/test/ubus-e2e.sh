@@ -1,5 +1,5 @@
 #!/bin/sh
-# ubus 控制面端到端测试（离线跑，需要 gcc / cmake / make / curl 以及能用的用户命名空间）
+# ubus 控制面端到端测试（离线跑，需要 gcc / cmake / make / curl / pkg-config 以及能用的用户命名空间）
 #
 # 为什么需要它：ubusd 只允许 uid 0 发布对象，普通用户直接跑 ubusd 时守护进程永远注册
 # 不上（上一版就是因此没能在离线环境验证注册）。这个脚本在 `unshare -r`（映射成 uid 0）
@@ -55,7 +55,7 @@ fetch_build() { # fetch_build <name> <repo> [extra cmake args...]
 if [ "${1:-}" != "--inside" ]; then
 	mkdir -p "$SRC" "$PREFIX"
 
-	for t in cmake gcc make curl; do
+	for t in cmake gcc make curl pkg-config; do
 		command -v "$t" >/dev/null || { echo "SKIP 缺少 $t"; exit 0; }
 	done
 
@@ -116,7 +116,7 @@ check $? "日志记 control plane: registered"
 ST=$("$UBUS" call hust-network-login status 2>/dev/null)
 echo "$ST" | grep -q '"state"'
 check $? "ubus call status 返回状态字段（$(echo "$ST" | tr -d '\n\t')）"
-echo "$ST" | grep -q '"ubus":"registered"'
+echo "$ST" | grep -q '"ubus": "registered"'
 check $? "status 的 ubus 字段=registered（控制面自检改由 ubus 暴露）"
 
 "$UBUS" call hust-network-login reconnect | grep -q '"result": true'
@@ -134,7 +134,7 @@ has_object; check $? "ubusd 重启后对象自己回来了"
 check $? "重启后 status 调用仍然可用（不超时）"
 grep -q 'ubus control plane: reconnecting' "$WORK/daemon.log"
 check $? "ubusd 重启时日志记 control plane: reconnecting"
-"$UBUS" call hust-network-login status | grep -q '"ubus":"registered"'
+"$UBUS" call hust-network-login status | grep -q '"ubus": "registered"'
 check $? "重启后 status 的 ubus 字段回到 registered"
 
 echo "-- 4. SIGTERM 干净退出"
