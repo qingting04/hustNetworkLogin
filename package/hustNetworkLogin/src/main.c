@@ -2,8 +2,10 @@
  * hust-network-login (C 版)
  * 华中科技大学校园网（深澜 ePortal）自动登录，掉线 15 秒自动重连。
  *
- * 依赖：libcurl（HTTP）。RSA 公钥运算（c = m^e mod n）在 src/modexp.h 里自带，
- *       不再链接 OpenSSL —— 只为一个 BN_mod_exp 就从源码编译整套 OpenSSL 太贵。
+ * 依赖：零第三方库。HTTP 在 src/http.h（明文 socket 实现），RSA 公钥模幂在
+ *       src/modexp.h；只链接 base system 里的 libubus / libubox。
+ *       为什么不用 libcurl/OpenSSL：ImmortalWrt 的 curl 默认 SSL 后端是 OpenSSL，
+ *       等于每次 CI 都要从源码编 openssl + curl（Build 步 10.8 min 的主因）。
  * 配置：环境变量 HUST_NETWORK_LOGIN_USERNAME / HUST_NETWORK_LOGIN_PASSWORD，
  *       或命令行传配置文件路径（两行：第一行用户名，第二行密码）。
  *
@@ -14,7 +16,7 @@
  *       不再依赖 rpcd 的 ucode 插件（插件加载失败会让页面彻底失能）。
  *       登录循环跑在单独的 worker 线程，主线程只跑 uloop 事件循环；
  *       连不上 ubusd / ubusd 重启导致对象消失时，每 5 秒重连并重新发布（自愈）。
- * 控制：SIGHUP = 中断当前 HTTP 传输并立刻重新认证（重连，不重启进程）；
+ * 控制：SIGHUP = 中断当前 HTTP 请求并立刻重新认证（重连，不重启进程）；
  *       SIGTERM/SIGINT = 干净退出（写 state=stopped、删 pidfile、注销 ubus 对象）。
  */
 #include <stdio.h>
@@ -27,7 +29,7 @@
 #include <time.h>
 #include <ctype.h>
 #include <pthread.h>
-#include <curl/curl.h>
+#include "http.h"
 #include "modexp.h"
 #include <libubox/utils.h>
 #include <libubox/blobmsg.h>
@@ -76,6 +78,12 @@ static long st_updated = 0;
 
 static pthread_t worker_tid;
 static struct ubus_context *ubus_ctx = NULL;
+
+/* http.h 的中断判据：手动重连（SIGHUP）或要退出（SIGTERM）时立刻放弃正在飞的请求 */
+static int http_should_abort(void)
+{
+	return (g_stop || g_reconnect) ? 1 : 0;
+}
 
 static void sig_handler(int sig)
 {
@@ -194,14 +202,8 @@ static void sleep_interruptible(int seconds)
 		seconds = sleep((unsigned int)seconds);
 }
 
-/* libcurl 进度回调：非 0 表示中断传输
- * （手动重连 SIGHUP、或收到 SIGTERM 要退出时，都让正在飞的请求立刻收摊） */
-static int xferinfo_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
-		       curl_off_t ultotal, curl_off_t ulnow)
-{
-	(void)p, (void)dltotal, (void)dlnow, (void)ultotal, (void)ulnow;
-	return (g_reconnect || g_stop) ? 1 : 0;
-}
+/* HTTP 客户端在 src/http.h（明文 socket 实现，接口与原来的 curl 版一致：
+ * http_get(url) / http_post(url, body)，返回响应体，失败返回 NULL） */
 
 /* 深澜 ePortal 的 RSA 公钥（e=10001, n=94dd2a86...，pageInfo 实测） */
 #define MODULUS \
@@ -210,94 +212,6 @@ static int xferinfo_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
 	"379af19ffb333e7517e390bd26ac312fe940c340466b4a5d4af1d65c3b5944078" \
 	"f96a1a51a5a53e4bc302818b7c9f63c4a1b07bd7d874cef1c3d4b2f5eb7871"
 #define EXPONENT "10001"
-
-/* 响应缓冲区 */
-struct resp_buf {
-	char *data;
-	size_t len;
-};
-
-static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
-{
-	struct resp_buf *buf = userdata;
-	size_t n = size * nmemb;
-	char *p = realloc(buf->data, buf->len + n + 1);
-	if (!p)
-		return 0;
-	buf->data = p;
-	memcpy(buf->data + buf->len, ptr, n);
-	buf->len += n;
-	buf->data[buf->len] = '\0';
-	return n;
-}
-
-/* HTTP GET，返回响应体（调用者 free），失败返回 NULL */
-static char *http_get(const char *url)
-{
-	CURL *curl = curl_easy_init();
-	struct resp_buf buf = {0};
-	char *result = NULL;
-
-	if (!curl)
-		return NULL;
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
-	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_cb);
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, "hust-network-login");
-
-	if (curl_easy_perform(curl) == CURLE_OK) {
-		result = buf.data ? buf.data : malloc(1);
-		if (result)
-			result[0] = '\0';
-	} else {
-		free(buf.data);
-	}
-
-	curl_easy_cleanup(curl);
-	return result;
-}
-
-/* HTTP POST，返回响应体（调用者 free），失败返回 NULL */
-static char *http_post(const char *url, const char *body)
-{
-	CURL *curl = curl_easy_init();
-	struct resp_buf buf = {0};
-	char *result = NULL;
-	struct curl_slist *headers = NULL;
-
-	if (!curl)
-		return NULL;
-
-	headers = curl_slist_append(headers,
-		"Content-Type: application/x-www-form-urlencoded; charset=UTF-8");
-	headers = curl_slist_append(headers, "Accept: */*");
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_POST, 1L);
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
-	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_cb);
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, "hust-network-login");
-
-	if (curl_easy_perform(curl) == CURLE_OK && buf.data)
-		result = buf.data;
-	else
-		free(buf.data);
-
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
-	return result;
-}
 
 /*
  * RSA 加密：c = BE(password ">" mac) ^ e mod n，输出小写 hex，左补零到 256 字符。
@@ -611,7 +525,7 @@ static int ubus_method_reconnect(struct ubus_context *ctx, struct ubus_object *o
 	g_reconnect = 1;
 
 	/* 把 SIGHUP 直接投给 worker 线程：复用现成的打断链路
-	 * （xferinfo 回调中止 curl 传输 + sleep_interruptible 提前返回），
+	 * （http.h 的每 100ms 中断检查 + sleep_interruptible 提前返回），
 	 * 因此是秒级生效，且不重启进程、不碰认证代码。 */
 	rc = pthread_kill(worker_tid, SIGHUP);
 
@@ -748,6 +662,7 @@ static void ubus_attach(void)
 int main(int argc, char **argv)
 {
 	openlog("hust-network-login", LOG_PID | LOG_NDELAY, LOG_DAEMON);
+	http_interrupt = http_should_abort;      /* 让 SIGHUP/SIGTERM 能打断正在飞的 HTTP */
 
 	/* SIGTERM/SIGINT = 干净退出；SIGHUP = 中断当前请求并立刻重新认证（重连不重启进程） */
 	{
@@ -766,7 +681,7 @@ int main(int argc, char **argv)
 		/*
 		 * 主线程屏蔽这三个信号，让它们只投递给 worker 线程：
 		 * ubus 的 reconnect 用 pthread_kill(worker, SIGHUP) 就能精准打断
-		 * worker 里阻塞中的 curl 传输；否则信号可能落在主线程，重连要等
+		 * worker 里阻塞中的 HTTP 请求；否则信号可能落在主线程，重连要等
 		 * 当前请求超时（最长 10 秒）才生效。
 		 */
 		sigemptyset(&set);
@@ -814,7 +729,6 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	curl_global_init(CURL_GLOBAL_ALL);
 
 	write_pidfile();
 	write_state("idle");
@@ -854,7 +768,6 @@ int main(int argc, char **argv)
 		uloop_done();
 	}
 
-	curl_global_cleanup();
 	syslog(LOG_INFO, "stopped");
 	closelog();
 
