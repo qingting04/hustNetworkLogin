@@ -36,6 +36,9 @@ msgstr "最近错误"
 msgid "Login failed, retrying"
 msgstr "登录失败，重试中"
 
+msgid "Missing required settings: %s - fill them in, then click \"Save & Apply\"."
+msgstr "缺少必填项：%s —— 填好后点「保存并应用」。"
+
 msgid "Online"
 msgstr "已在线"
 
@@ -65,9 +68,6 @@ msgstr "已停止"
 
 msgid "The login service is authenticating again now (requested by %s). Check \"logread | grep -i hust\" for details."
 msgstr "登录服务正在重新认证（触发方式：%s）。详情见「logread | grep -i hust」。"
-
-msgid "The service is disabled - enable it and apply the settings first."
-msgstr "服务未启用 —— 请先启用并保存配置。"
 
 msgid "Unknown"
 msgstr "未知"

@@ -9,7 +9,7 @@
 /*
  * 状态与控制都走 ubus 对象 hust-network-login（由 C 守护进程自己注册，
  * 不再依赖 rpcd 的 ucode 插件）：
- *   status    → { state, last_error, updated, running, pid, enabled }
+ *   status    → { state, last_error, updated, running, pid }
  *   reconnect → 让守护进程立刻重新认证（SIGHUP，不重启进程）
  * 字段命名与 jluNetworkLogin 的 ubus status 对齐。
  *
@@ -56,6 +56,35 @@ function rpc_message(e) {
 	return msg;
 }
 
+/*
+ * 缺项提醒：必填项与 init 脚本的启动条件逐条对齐（enabled=1 + 用户名 + 密码），
+ * 缺任何一项守护进程都不会启动 —— 此时页面只会看到「服务未运行」，光看现象猜
+ * 不出原因。所以缺什么就直接写进「最近错误」（与表单标签同一批 msgid，措辞一致）。
+ */
+function missing_settings() {
+	var missing = [];
+
+	if (uci.get('hust-network-login', 'main', 'enabled') != '1')
+		missing.push(_('Enable automatic login'));
+
+	if (!uci.get('hust-network-login', 'main', 'username'))
+		missing.push(_('Username'));
+
+	if (!uci.get('hust-network-login', 'main', 'password'))
+		missing.push(_('Password'));
+
+	return missing;
+}
+
+/* 缺项提醒文本；没缺项时返回 null */
+function missing_message() {
+	var missing = missing_settings();
+
+	return missing.length
+		? _('Missing required settings: %s - fill them in, then click "Save & Apply".').format(missing.join(', '))
+		: null;
+}
+
 function row(label, node) {
 	return E('div', { 'class': 'tr' }, [
 		E('div', { 'class': 'td left' }, [ label ]),
@@ -77,12 +106,13 @@ return view.extend({
 
 	handleReconnect: function(ev) {
 		var btn = ev.currentTarget;
+		var missing = missing_message();
 
-		if (uci.get('hust-network-login', 'main', 'enabled') != '1') {
-			ui.addNotification(_('Reconnect'),
-				E('p', [ _('The service is disabled - enable it and apply the settings first.') ]), 'warning');
+		/* 配置缺项时点重连没有意义（守护进程根本没在跑），直接提示缺什么 */
+		if (missing) {
+			ui.addNotification(_('Reconnect'), E('p', [ missing ]), 'warning');
 
-			return Promise.resolve();
+			return this.refresh_status();
 		}
 
 		btn.disabled = true;
@@ -115,16 +145,18 @@ return view.extend({
 	},
 
 	refresh_status: function() {
-		/* 只显示连接状态与最近错误：守护进程不在运行时 ubus 会回 -32000
-		 * Object not found，这里翻译成「服务未运行」+ 排查提示，
-		 * 而不是留一句「未知」。 */
+		/* 只显示连接状态与最近错误。优先级：配置缺项 > 守护进程上报的最近错误 >
+		 * RPC 失败原因。缺项一定排在前面 —— 那种情况下守护进程根本不会启动，
+		 * 提示「缺什么」比任何历史日志都有用。 */
+		var missing = missing_message();
+
 		return callStatus().then(function(st) {
 			set_text('hust-status-state', state_label(st.state));
-			set_text('hust-status-error', st.last_error || '-');
+			set_text('hust-status-error', missing || st.last_error || '-');
 			this.set_available(true);
 		}.bind(this)).catch(function(e) {
 			set_text('hust-status-state', _('Service not running'));
-			set_text('hust-status-error', rpc_message(e));
+			set_text('hust-status-error', missing || rpc_message(e));
 			this.set_available(false);
 		}.bind(this));
 	},
@@ -180,7 +212,7 @@ return view.extend({
 			]);
 
 			/* 先问一次状态再放开按钮：守护进程没在跑时按钮保持禁用，
-			 * 用户看到的是「服务未运行 + 怎么启动」，而不是一串 RPC 报错 */
+			 * 用户看到的是「服务未运行 + 原因」，而不是一串 RPC 报错 */
 			btn.disabled = true;
 			this.refresh_status();
 			poll.add(L.bind(this.refresh_status, this));

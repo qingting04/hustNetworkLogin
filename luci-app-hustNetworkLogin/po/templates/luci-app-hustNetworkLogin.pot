@@ -36,6 +36,9 @@ msgstr ""
 msgid "Login failed, retrying"
 msgstr ""
 
+msgid "Missing required settings: %s - fill them in, then click \"Save & Apply\"."
+msgstr ""
+
 msgid "Online"
 msgstr ""
 
@@ -64,9 +67,6 @@ msgid "Stopped"
 msgstr ""
 
 msgid "The login service is authenticating again now (requested by %s). Check \"logread | grep -i hust\" for details."
-msgstr ""
-
-msgid "The service is disabled - enable it and apply the settings first."
 msgstr ""
 
 msgid "Unknown"
