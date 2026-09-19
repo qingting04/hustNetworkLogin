@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=hustNetworkLogin
 PKG_VERSION:=0.2.0
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_BUILD_DEPENDS:=curl openssl libubox libubus
 
 PKG_LICENSE:=MIT
@@ -21,10 +21,8 @@ define Package/hustNetworkLogin
 endef
 
 define Package/hustNetworkLogin/description
-  Automatic Srun ePortal login for the HUST campus network (C implementation),
-  reconnects automatically 15 seconds after the connection drops. Exposes the
-  ubus object "hust-network-login" (status / reconnect) for the LuCI page and
-  for scripts - no rpcd plugin needed.
+  Automatic Srun ePortal login for the HUST campus network, providing the
+  "hust-network-login" ubus object (status / reconnect) used by the LuCI page.
 endef
 
 define Build/Prepare
