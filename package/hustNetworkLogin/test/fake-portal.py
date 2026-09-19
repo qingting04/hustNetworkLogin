@@ -114,10 +114,17 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             REPORT['requests'].append('POST ' + self.requestline)
 
-        # 先收下所有 POST（把路径记进报告），别因为路径不匹配就丢掉现场
-        if not self.path.startswith('/ePortal/InterFace.do'):
-            REPORT['path_mismatch'] = self.path
-            save_report()
+        # 只认 ePortal 的标准登录端点，大小写严格：上游 Rust 版是
+        #   http://<portal_ip>/eportal/InterFace.do?method=login
+        # （小写 eportal、大写 InterFace）。这里写错过一次（/ePortal/...），
+        # 把正确的请求判成 404，白排查了一轮 —— 所以现在不匹配就记 path_mismatch。
+        if not self.path.startswith('/eportal/InterFace.do'):
+            with LOCK:
+                REPORT['path_mismatch'] = self.path
+                REPORT['errors'].append('unexpected POST path: ' + self.path)
+                save_report()
+            self._send(404, b'not found')
+            return
 
         want = cipher(ARGS.password, ARGS.mac)
         m = re.search(r'password=([0-9a-fA-F]{256})', body)

@@ -225,6 +225,8 @@ check $? "表单带 passwordEncrypt=true"
 check $? "表单 userId 正确（$(json "$REPORT" user)）"
 grep -q "/portal" "$REPORT"
 check $? "门户页面被真正 GET 过"
+[ "$(json "$REPORT" path_mismatch)" = "None" ]
+check $? "登录 POST 打在 /eportal/InterFace.do?method=login（大小写与上游 Rust 版一致；实际 path_mismatch=$(json "$REPORT" path_mismatch)）"
 [ "$(state_field state)" = "online" ]
 check $? "登录成功后状态回到 online（实际 state=$(state_field state) last_error=$(state_field last_error)）"
 phase_done "阶段 2"
