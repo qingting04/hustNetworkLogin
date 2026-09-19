@@ -123,10 +123,12 @@ return view.extend({
 
 		btn.disabled = true;
 
-		/* 成功不弹提示：状态区几秒内就会自己刷新成「认证中 → 已在线」，
-		 * 再弹一个窗口只是多一次点击。只有失败/缺项才提醒。 */
 		return callReconnect().then(function(res) {
-			if (!res || !res.result) {
+			if (res && res.result) {
+				ui.addNotification(_('Reconnect'),
+					E('p', [ _('The login service is authenticating again now (requested by %s). Check "logread | grep -i hust" for details.').format(res.action || 'signal') ]), 'info');
+			}
+			else {
 				ui.addNotification(_('Reconnect'),
 					E('p', [ _('Reconnect failed: %s').format((res && res.error) || _('unknown error')) ]), 'warning');
 			}

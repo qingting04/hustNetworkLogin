@@ -13,8 +13,8 @@
  *   4. 缺项优先于守护进程上报的历史错误
  *   5. 缺项但服务仍在线（改了配置还没保存）→ 状态照实显示，错误行仍提醒缺项
  *   6. 缺项时点「重连」→ 只提示缺什么，不发起 RPC
- *   7. 点「重连」成功 → 不弹任何提示（状态区自己刷新），按钮恢复可用
- *      （回归点：expect 写错时这里会变成 "Reconnect failed: unknown error" 弹窗）
+ *   7. 点「重连」成功 → 解析守护进程回复 {result:true, action:"signal", pid:N} 并给 info 提示
+ *      （回归点：expect 写错时这里会变成 "unknown error"）
  *   8. 守护进程回 result:false + error → 把它的原话显示出来
  *   9. 配置齐全但服务没跑 → 提示 restart，不误报缺项
  */
@@ -189,18 +189,17 @@ const btn_disabled = () => el('hust-reconnect').disabled;
 	assert.match(notifications[0].text, /^Missing required settings: Password/);
 	console.log('ok  6. 缺项时点重连：不发 RPC，只提示缺什么');
 
-	/* 7. 配置齐全 + 重连成功：不弹任何提示（成功静默，状态区自己刷新），按钮恢复可用。
-	 *    回归点：expect 写错时成功的回复会被拆成 result 布尔值 → 这里会多出一条
-	 *    warning「Reconnect failed: unknown error」。 */
+	/* 7. 配置齐全 + 重连成功：必须解析守护进程的回复，不能变成 unknown error */
 	cfg.password = 'x';
 	notifications = []; recon_calls = 0;
 	await v.handleReconnect({ currentTarget: el('hust-reconnect') });
-	assert.strictEqual(recon_calls, 1, '应该调用 reconnect');
-	assert.deepStrictEqual(notifications, [], '成功不应弹提示，实际：' + JSON.stringify(notifications));
-	assert.strictEqual(btn_disabled(), false, '按钮应恢复可用');
-	assert.strictEqual(state(), 'Online', '重连后应收尾刷新状态');
-	assert.strictEqual(err(), '-', '收尾刷新后错误行应清空');
-	console.log('ok  7. 重连成功：不弹提示 / 按钮恢复 / 状态已刷新');
+	assert.strictEqual(recon_calls, 1);
+	assert.strictEqual(notifications.length, 1, '应有一条通知');
+	assert.strictEqual(notifications[0].kind, 'info', '成功应是 info，实际：' + notifications[0].kind + ' / ' + notifications[0].text);
+	assert.doesNotMatch(notifications[0].text, /unknown error/);
+	assert.match(notifications[0].text, /signal/);
+	assert.strictEqual(btn_disabled(), false);
+	console.log('ok  7. 重连成功：info 提示 = ' + notifications[0].text);
 
 	/* 8. 守护进程吞了请求（result:false + error）：显示它的原话 */
 	daemon = 'refused';

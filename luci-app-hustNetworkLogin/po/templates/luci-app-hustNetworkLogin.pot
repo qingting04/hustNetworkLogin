@@ -66,6 +66,9 @@ msgstr ""
 msgid "Stopped"
 msgstr ""
 
+msgid "The login service is authenticating again now (requested by %s). Check \"logread | grep -i hust\" for details."
+msgstr ""
+
 msgid "Unknown"
 msgstr ""
 
