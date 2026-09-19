@@ -115,6 +115,23 @@ check() { # check <0|1> <描述>
 
 state_field() { sed -n "s/^$1=//p" "$STATE" 2>/dev/null; }
 
+log_off() { wc -c <"$LOG" 2>/dev/null || echo 0; }
+log_since() { tail -c "+$(( $1 + 1 ))" "$LOG" 2>/dev/null; }
+
+# 每个阶段开始时记一次日志偏移；阶段失败就把这段日志存下来（注解优先发它，
+# 因为全局日志尾部往往是后面阶段的内容，看不出失败那一刻发生了什么）
+phase_start() { PHASE_OFF=$(log_off); PHASE_FAILS=$fails; }
+phase_done() { # phase_done <阶段名>
+	if [ "$fails" != "$PHASE_FAILS" ] && [ ! -f "$WORK/phase-fail.log" ]; then
+		{
+			echo "===== $1 失败的现场 ====="
+			echo "state=$(state_field state) last_error=$(state_field last_error) ubus=$(state_field ubus)"
+			echo "--- 该阶段守护进程日志 ---"
+			log_since "$PHASE_OFF"
+		} >"$WORK/phase-fail.log"
+	fi
+}
+
 has_object() { "$UBUS" list 2>/dev/null | grep -qx hust-network-login; }
 
 json() { # json <表达式文件> <key>
@@ -163,6 +180,7 @@ kill -0 "$UPID" 2>/dev/null
 check $? "ubusd 起来了"
 
 echo "-- 1. 在线探测：state=online + ubus 对象与字段契约"
+phase_start
 start_daemon "http://127.0.0.1:$PORT/generate_204"
 sleep 3
 
@@ -183,11 +201,16 @@ check $? "ubus call status 返回状态字段（$(echo "$ST" | tr -d '\n\t')）"
 
 "$UBUS" call hust-network-login reconnect | grep -q '"result": true'
 check $? "ubus call reconnect 返回布尔 result=true（页面 expect 要求布尔）"
+phase_done "阶段 1"
 
 echo "-- 2. 假门户登录：解析 → 加密 → POST（密文与 Python 期望值对拍）"
 stop_daemon
-start_daemon "http://127.0.0.1:$PORT/portal"
+phase_start
+start_daemon "http://127.0.0.1:$PORT/portal" 15
 sleep 3
+
+kill -0 "$DPID" 2>/dev/null
+check $? "守护进程仍在跑（没崩）"
 
 mkdir -p "$WORK"
 [ -f "$REPORT" ]
@@ -203,9 +226,11 @@ check $? "表单 userId 正确（$(json "$REPORT" user)）"
 grep -q "/portal" "$REPORT"
 check $? "门户页面被真正 GET 过"
 [ "$(state_field state)" = "online" ]
-check $? "登录成功后状态回到 online"
+check $? "登录成功后状态回到 online（实际 state=$(state_field state) last_error=$(state_field last_error)）"
+phase_done "阶段 2"
 
 echo "-- 3. 探测地址全不可达 → state=error"
+phase_start
 stop_daemon
 start_daemon "http://127.0.0.1:$DEAD/nothing"
 sleep 3
@@ -218,6 +243,7 @@ case "$(state_field last_error)" in
 *)
 	check 1 "last_error 应为 all probe urls failed，实际：$(state_field last_error)" ;;
 esac
+phase_done "阶段 3"
 
 echo "-- 4. 卡住的请求能被 SIGHUP（重连）立刻打断"
 stop_daemon
@@ -291,9 +317,15 @@ if [ "$fails" != 0 ]; then
 		n=$((n + 1))
 	done <"$FAILED" 2>/dev/null
 	echo "::error::state=$(state_field state) last_error=$(state_field last_error) ubus=$(state_field ubus)"
-	tail -4 "$LOG" 2>/dev/null | while IFS= read -r line; do
-		echo "::error::daemon: $line"
-	done
+	if [ -f "$WORK/phase-fail.log" ]; then
+		tail -6 "$WORK/phase-fail.log" | while IFS= read -r line; do
+			echo "::error::$line"
+		done
+	else
+		tail -4 "$LOG" 2>/dev/null | while IFS= read -r line; do
+			echo "::error::daemon: $line"
+		done
+	fi
 fi
 
 echo
