@@ -66,9 +66,6 @@ msgstr "启动中"
 msgid "Stopped"
 msgstr "已停止"
 
-msgid "The login service is authenticating again now (requested by %s). Check \"logread | grep -i hust\" for details."
-msgstr "登录服务正在重新认证（触发方式：%s）。详情见「logread | grep -i hust」。"
-
 msgid "Unknown"
 msgstr "未知"
 
