@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=hustNetworkLogin
 PKG_VERSION:=0.2.0
-PKG_RELEASE:=7
+PKG_RELEASE:=8
 PKG_BUILD_DEPENDS:=curl openssl libubox ubus
 
 PKG_LICENSE:=MIT

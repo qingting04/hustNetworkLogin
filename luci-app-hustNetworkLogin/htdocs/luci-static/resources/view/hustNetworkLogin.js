@@ -178,11 +178,15 @@ return view.extend({
 		o = s.option(form.Flag, 'enabled', _('Enable automatic login'));
 		o.rmempty = false;
 
+		/* 用户名/密码允许存空（rmempty=true）：空值时 uci 里没有这个选项，
+		 * init 脚本本来就不会启动守护进程，页面「最近错误」行会提醒缺什么。
+		 * 若用 rmempty=false，LuCI 保存时会红字报「不能为空」并拦住保存 —— 
+		 * 初次配置想先存一半、或想清掉账号停用，都会被那条提醒卡住。 */
 		o = s.option(form.Value, 'username', _('Username'));
-		o.rmempty = false;
+		o.rmempty = true;
 
 		o = s.option(form.Value, 'password', _('Password'));
-		o.rmempty = false;
+		o.rmempty = true;
 		o.password = true;
 
 		/* 默认值必须与守护进程内置默认（src/main.c 的 test_url）和
