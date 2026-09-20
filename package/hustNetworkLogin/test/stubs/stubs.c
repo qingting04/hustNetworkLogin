@@ -44,6 +44,8 @@ CURLcode curl_easy_setopt(CURL *h, int opt, ...)
 	case CURLOPT_TIMEOUT:
 	case CURLOPT_NOPROGRESS:
 	case CURLOPT_CONNECTTIMEOUT:
+	case CURLOPT_FOLLOWLOCATION:
+	case CURLOPT_MAXREDIRS:
 		(void)va_arg(ap, long);
 		break;
 	default:
@@ -62,6 +64,20 @@ CURLcode curl_easy_perform(CURL *h)
 	(void)h;
 	if (g_write_cb)
 		g_write_cb((void *)body, 1, sizeof(body) - 1, g_write_data);
+
+	return CURLE_OK;
+}
+
+CURLcode curl_easy_getinfo(CURL *h, CURLINFO info, ...)
+{
+	va_list ap;
+
+	(void)h;
+	if (info == CURLINFO_RESPONSE_CODE) {
+		va_start(ap, info);
+		*va_arg(ap, long *) = 204;
+		va_end(ap);
+	}
 
 	return CURLE_OK;
 }

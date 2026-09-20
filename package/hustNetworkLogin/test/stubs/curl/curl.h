@@ -26,7 +26,12 @@ enum {
 	CURLOPT_POST = 47,
 	CURLOPT_CONNECTTIMEOUT = 78,
 	CURLOPT_XFERINFOFUNCTION = 20219,
+	CURLOPT_FOLLOWLOCATION = 5201, /* 桩不实现重定向，值随便给（避开与上面撞号） */
+	CURLOPT_MAXREDIRS = 5202,
 };
+
+typedef int CURLINFO;
+#define CURLINFO_RESPONSE_CODE 2097154
 
 #define CURLE_OK 0
 #define CURL_GLOBAL_ALL 0
@@ -34,6 +39,7 @@ enum {
 CURL *curl_easy_init(void);
 CURLcode curl_easy_setopt(CURL *h, int opt, ...);
 CURLcode curl_easy_perform(CURL *h);
+CURLcode curl_easy_getinfo(CURL *h, CURLINFO info, ...);
 void curl_easy_cleanup(CURL *h);
 void curl_global_init(long flags);
 void curl_global_cleanup(void);

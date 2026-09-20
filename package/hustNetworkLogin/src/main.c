@@ -193,12 +193,14 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
 	return n;
 }
 
-/* HTTP GET，返回响应体（调用者 free），失败返回 NULL */
-static char *http_get(const char *url)
+/* HTTP GET，返回响应体（调用者 free），失败返回 NULL；
+ * code 回填最终的 HTTP 状态码（跟随重定向之后），可为 NULL */
+static char *http_get(const char *url, long *code)
 {
 	CURL *curl = curl_easy_init();
 	struct resp_buf buf = {0};
 	char *result = NULL;
+	long status = 0;
 
 	if (!curl)
 		return NULL;
@@ -211,14 +213,22 @@ static char *http_get(const char *url)
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_cb);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "hust-network-login");
+	/* 跟随重定向：未登录时门户常把探测请求 302 到门户页，
+	 * 不跟的话拿到的只是个空 body，会被误判成「已在线」 */
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
 
 	if (curl_easy_perform(curl) == CURLE_OK) {
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 		result = buf.data ? buf.data : malloc(1);
-		if (result)
+		if (result && !buf.data)
 			result[0] = '\0';
 	} else {
 		free(buf.data);
 	}
+
+	if (code)
+		*code = status;
 
 	curl_easy_cleanup(curl);
 	return result;
@@ -354,7 +364,11 @@ static void trim_crlf(char *s)
 }
 
 
-/* 依次探测多个候选地址（逗号分隔），返回第一个能连上的响应体（调用者 free），全失败返回 NULL */
+/* 依次探测多个候选地址（逗号分隔），返回第一个「有效」响应体（调用者 free），
+ * 全失败返回 NULL。
+ * 有效 = 拿到非空内容，或标准 204（在线时 generate_204 的合法应答）。
+ * 空 body 的其它状态（如门户对探测地址直接回 302/空页）没有任何可解析的
+ * 门户标志，不能当成「已在线」，继续试下一个候选地址。 */
 static char *probe(void)
 {
 	const char *p = test_url;
@@ -363,6 +377,7 @@ static char *probe(void)
 		char url[256];
 		size_t i = 0;
 		char *u, *resp;
+		long code = 0;
 
 		while (*p && *p != ',' && i < sizeof(url) - 1)
 			url[i++] = *p++;
@@ -373,10 +388,12 @@ static char *probe(void)
 			u++;
 
 		if (*u) {
-			resp = http_get(u);
-			if (resp)
+			resp = http_get(u, &code);
+			if (resp && (resp[0] || code == 204))
 				return resp;
-			syslog(LOG_WARNING, "probe %s failed, trying next", u);
+			syslog(LOG_WARNING, "probe %s got no usable response (http %ld), trying next",
+			       u, code);
+			free(resp);
 		}
 
 		if (*p == ',')
@@ -391,7 +408,7 @@ static int login(const char *username, const char *password)
 {
 	char *resp, *enc, *qs_enc, *login_resp;
 	char portal_ip[64], mac[128], query_string[1024];
-	char body[2048], login_url[160];
+	char body[4096], login_url[160];
 	int ok = -1;
 
 	write_state("probe");
@@ -432,9 +449,15 @@ static int login(const char *username, const char *password)
 	enc = encrypt_pass(password, mac);
 	qs_enc = url_encode(query_string);
 
-	snprintf(body, sizeof(body),
-		 "userId=%s&password=%s&service=&queryString=%s&passwordEncrypt=true",
-		 username, enc, qs_enc);
+	if (snprintf(body, sizeof(body),
+		     "userId=%s&password=%s&service=&queryString=%s&passwordEncrypt=true",
+		     username, enc, qs_enc) >= (int)sizeof(body)) {
+		set_error("login request body too large");
+		free(enc);
+		free(qs_enc);
+		free(resp);
+		return -1;
+	}
 
 	snprintf(login_url, sizeof(login_url),
 		 "http://%s/eportal/InterFace.do?method=login", portal_ip);
