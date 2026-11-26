@@ -3,7 +3,12 @@ name: build
 on:
   push:
     branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   SDK_VERSION: "25.12.2"
@@ -23,6 +28,9 @@ jobs:
 
       - name: 视图逻辑回归（node 跑真实视图源码，含重连回复解析）
         run: node luci-app-hustNetworkLogin/test/view-test.js
+
+      - name: ePortal 登录请求字节级回归
+        run: sh package/hustNetworkLogin/test/run-request-tests.sh
 
       - name: Install zstd
         run: sudo apt-get update && sudo apt-get install -y zstd
@@ -51,9 +59,22 @@ jobs:
           make package/hustNetworkLogin/compile V=s -j$(nproc)
           make package/luci-app-hustNetworkLogin/compile V=s -j$(nproc)
 
+      - name: Verify all three APKs were built
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          for package in hustNetworkLogin luci-app-hustNetworkLogin luci-i18n-hustNetworkLogin-zh-cn; do
+            files=(immortalwrt-sdk-*/bin/packages/**/"$package"*.apk)
+            if (( ${#files[@]} == 0 )); then
+              printf '::error::No APK built for %s\n' "$package"
+              exit 1
+            fi
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: error
           name: hustNetworkLogin
           path: |
             immortalwrt-sdk-*/bin/packages/**/hustNetworkLogin*.apk

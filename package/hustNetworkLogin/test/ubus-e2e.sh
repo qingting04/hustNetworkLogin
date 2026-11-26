@@ -19,7 +19,7 @@ set -u
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 PKG=$(dirname "$HERE")
-MAIN="$PKG/src/main.c"
+DAEMON_SRC="$PKG/src"
 
 WORK=${WORK:-/tmp/hust-ubus-e2e}
 PREFIX="$WORK/prefix"
@@ -72,7 +72,7 @@ if [ "${1:-}" != "--inside" ]; then
 
 	echo "== 用 src/main.c + 桩（libcurl/OpenSSL/syslog）编译守护进程 =="
 	gcc -Wall -Wextra -Werror -I"$STUB" -I"$PREFIX/include" -o "$DAEMON" \
-		"$MAIN" "$STUB/stubs.c" "$STUB/syslog_stub.c" \
+		"$DAEMON_SRC/main.c" "$DAEMON_SRC/eportal-request.c" "$STUB/stubs.c" "$STUB/syslog_stub.c" \
 		-L"$PREFIX/lib" -lubus -lubox -ljson-c -pthread -Wl,-rpath,"$PREFIX/lib" \
 		|| { echo "FAIL 编译守护进程"; exit 1; }
 
