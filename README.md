@@ -93,7 +93,8 @@ make package/luci-app-hustNetworkLogin/compile V=s
 ```sh
 python3 luci-app-hustNetworkLogin/test/check.py     # 默认值三处一致 / 翻译覆盖 / JSON+JS 语法
 node    luci-app-hustNetworkLogin/test/view-test.js # 视图逻辑回归（桩掉 LuCI 环境，跑真实视图源码）
-sh package/hustNetworkLogin/test/ubus-e2e.sh        # ubus 控制面端到端（真 ubusd + 桩掉 curl/openssl 的真 main.c）
+sh package/hustNetworkLogin/test/run-request-tests.sh # ePortal 请求字节级回归（CI 编译真实编码模块）
+sh package/hustNetworkLogin/test/ubus-e2e.sh          # ubus 控制面端到端（真 ubusd + 桩掉 curl/openssl 的守护进程）
 ```
 
 `view-test.js` 里 `rpc.declare` 的 `expect` 处理是**逐字照搬** `luci-static/resources/rpc.js`
@@ -220,8 +221,9 @@ ubus call hust-network-login status                 # 起来了就能直接读�
 .
 ├── package/hustNetworkLogin/          # C 软件包
 │   ├── Makefile                       #   标准 C 包，$(TARGET_CC) 交叉编译
-│   ├── src/main.c                     #   C 源码（登录 + RSA + 检测 + ubus 控制面）
-│   ├── test/test_encrypt.c            #   加密自测（对照上游用例）
+│   ├── src/main.c                     #   守护进程：探测、门户解析、HTTP、ubus
+│   ├── src/eportal-request.{c,h}      #   登录表单序列化、RSA 和 queryString 编码
+│   ├── test/test_encrypt.c            #   真实生产模块的登录请求字节级回归
 │   ├── test/ubus-e2e.sh + stubs/      #   ubus 控制面端到端自测（真 ubusd + 桩掉 curl/openssl）
 │   └── files/
 │       ├── etc/init.d/hust-network-login   # procd 服务脚本
